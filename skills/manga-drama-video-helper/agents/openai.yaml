@@ -1,0 +1,4 @@
+interface:
+  display_name: "漫剧视频助手"
+  short_description: "分析剧本、生成人物场景素材并合成带配音和BGM的漫剧视频"
+  default_prompt: "Use $manga-drama-video-helper in auto_review mode to generate the next episode with the current model, keep characters consistent, add realistic emotions and bilingual subtitles, and save script/assets/video to my chosen directory."

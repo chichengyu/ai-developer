@@ -1,0 +1,145 @@
+name: ci
+
+# Cross-platform CI for the desktop-app-dev skill.
+#
+# Three jobs, one per OS, each running the matching smoke test:
+#   - windows-latest: smoke_windows.ps1
+#   - macos-latest:   smoke_macos.sh (with brew pwsh)
+#   - ubuntu-latest:  smoke_linux.sh (with apt pwsh)
+#
+# Triggers on push to main, on PRs targeting main, and manual dispatch.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- Lint (Python) ------------------------------------------------------
+  # Runs on ubuntu-latest because ruff + mypy install cleanly there.
+  # Skipping Windows because Bash-friendly tooling is faster.
+  lint:
+    name: lint (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff + mypy
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ruff==0.6.9" "mypy==1.13.0" types-requests
+
+      - name: ruff check
+        run: ruff check scripts/ tests/ examples/
+
+      - name: ruff format --check
+        run: ruff format --check scripts/
+
+      - name: mypy scripts/
+        run: mypy scripts/ || true   # intentional: many scripts use untyped ctypes; surface warnings without failing the build
+
+  # ---- Windows ------------------------------------------------------------
+  test-windows:
+    name: smoke (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run smoke_windows.ps1
+        shell: pwsh
+        run: ./tests/smoke_windows.ps1
+
+      - name: Upload smoke logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs-windows
+          path: |
+            **/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---- macOS --------------------------------------------------------------
+  test-macos:
+    name: smoke (macos-latest)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PowerShell (for cross-script parse)
+        run: |
+          brew update
+          brew install --cask powershell
+
+      - name: Run smoke_macos.sh
+        run: bash ./tests/smoke_macos.sh
+
+      - name: Upload smoke logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs-macos
+          path: |
+            **/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---- Linux --------------------------------------------------------------
+  # Pin to ubuntu-22.04 because Microsoft's pwsh apt repo URL is keyed to
+  # the Ubuntu codename; `ubuntu-latest` is 24.04 as of 2026 and the URL
+  # below would 404. Bump to 24.04 here when Microsoft ships matching
+  # packages.
+  test-linux:
+    name: smoke (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PowerShell (for cross-script parse)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget apt-transport-https software-properties-common
+          wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update -y
+          sudo apt-get install -y powershell
+
+      - name: Run smoke_linux.sh
+        run: bash ./tests/smoke_linux.sh
+
+      - name: Upload smoke logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs-linux
+          path: |
+            **/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+

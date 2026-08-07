@@ -1,0 +1,40 @@
+format_version: "13"
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+
+project_type: other
+
+workflows:
+  primary:
+    steps:
+      - activate-ssh-key@4:
+          run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
+      - git-clone@8: {}
+      - script@1:
+          title: Run tests
+          inputs:
+            - content: |
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [ -f pubspec.yaml ]; then
+                  flutter pub get
+                  flutter test
+                elif [ -f package.json ]; then
+                  npm ci
+                  npm test
+                elif [ -f build.gradle.kts ]; then
+                  ./gradlew test
+                fi
+      - script@1:
+          title: Build release
+          inputs:
+            - content: |
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [ -f pubspec.yaml ]; then
+                  flutter build appbundle --release
+                elif [ -f package.json ]; then
+                  cd android && ./gradlew :app:bundleRelease
+                elif [ -f build.gradle.kts ]; then
+                  ./gradlew :app:bundleRelease
+                fi
+      - deploy-to-bitrise-io@2: {}

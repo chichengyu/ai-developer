@@ -1,0 +1,25 @@
+{
+  "postprocess_plan_version": 1,
+  "profile": "balanced",
+  "enabled": true,
+  "order": ["stabilize", "deinterlace", "denoise", "sharpen", "color", "upscale", "grain"],
+  "filters": {
+    "stabilize": {"enabled": true, "method": "vidstab", "shakiness": 5},
+    "deinterlace": {"enabled": false, "method": "yadif"},
+    "denoise": {"enabled": true, "method": "hqdn3d", "strength": 3},
+    "sharpen": {"enabled": true, "method": "unsharp", "amount": 0.5},
+    "color": {"enabled": true, "method": "eq", "params": {"saturation": 1.05, "contrast": 1.03}},
+    "upscale": {"enabled": false, "method": "real-esrgan", "scale": 2, "model": "realesrgan_x4plus"},
+    "grain": {"enabled": true, "method": "noise", "amount": 3}
+  },
+  "vapoursynth": {
+    "enabled": false,
+    "script": null,
+    "plugins": [],
+    "models": {}
+  },
+  "outputs": {
+    "video": "09_final_enhanced.mp4",
+    "video_with_subs": "09_final_enhanced_with_subs.mp4"
+  }
+}

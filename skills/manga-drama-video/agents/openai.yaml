@@ -1,0 +1,17 @@
+interface:
+  display_name: "Manga Drama Video"
+  short_description: "9:16 / 16:9 AI 漫剧 with cross-episode character consistency, 2026 爆款男主风格, 3D 国风仙侠, 写实动漫 or 数字真人, and 配音."
+  brand_color: "#E63946"
+  default_prompt: "Use $manga-drama-video with the series continuity lock: one locked face for 张三 across every episode. Auto-read any user-provided resources, auto-select engines into engine_plan.json, then make a 30s 抖音 9:16 写实动漫 episode about a tired salaryman who finds a cat in a neon alley, using the 2026 AI 漫剧 style bank: realistic skin, sharp outlines, no AI artifacts, natural motion and lip sync, auto storyboard, fight/camera breakdown, 配音, and FFmpeg/VapourSynth post-processing."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "imagegen"
+      description: "Used by Step 5 to render every storyboard shot."
+    - type: "mcp"
+      value: "speech"
+      description: "Used by Step 6 to generate narration and dialogue (配音). Falls back to OpenAI / Edge TTS if unavailable."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>WpfThreadingDemo</RootNamespace>
+    <AssemblyName>WpfThreadingDemo</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Pull in the threading template from the skill. -->
+    <Compile Include="..\..\scripts\threading_wpf.cs" Link="threading_wpf.cs" />
+  </ItemGroup>
+</Project>

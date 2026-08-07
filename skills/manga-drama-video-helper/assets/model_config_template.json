@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "current": {
+    "provider": null,
+    "model": null,
+    "roles": [],
+    "selected_at": null,
+    "note": null
+  },
+  "history": []
+}

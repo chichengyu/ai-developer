@@ -1,0 +1,18 @@
+{
+  "engine_plan_version": 1,
+  "auto": true,
+  "engines": {
+    "image": {"name": "imagegen", "status": "available", "params": {}},
+    "video_gen": {"name": "current-model-api", "status": "configured", "params": {}},
+    "video": {"name": "ffmpeg", "status": "available", "params": {}},
+    "audio_tts": {"name": "speech", "status": "available", "params": {}},
+    "digital_human": {"name": "current-model-audio-to-video", "status": "configured", "params": {}},
+    "audio_lip_sync": {"name": "current-model-audio-to-video", "status": "configured", "params": {}},
+    "camera_motion": {"name": "ffmpeg-ken-burns", "status": "available", "params": {}},
+    "subtitles": {"name": "ffmpeg-subtitles", "status": "available", "params": {}},
+    "resource_reader": {"name": "codex-tools", "status": "available", "params": {}}
+  },
+  "fallbacks": {},
+  "user_overrides": {},
+  "notes": []
+}

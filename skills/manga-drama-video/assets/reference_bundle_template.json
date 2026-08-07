@@ -1,0 +1,31 @@
+{
+  "bundle_version": 1,
+  "type": "mixed-reference",
+  "created_at": null,
+  "images": {
+    "character_front": null,
+    "character_three_quarter": null,
+    "character_side": null,
+    "character_expression": null,
+    "character_action": null,
+    "scene_wide": null,
+    "scene_detail": null,
+    "style_reference": null,
+    "composition_reference": null
+  },
+  "videos": {
+    "motion_primary": null,
+    "action_beat": null,
+    "camera_move": null
+  },
+  "audio": {
+    "voice_timbre": null,
+    "emotion_line": null,
+    "ambience_sfx": null
+  },
+  "usage": {
+    "images": "Seedream/Seedance identity, scene, style, composition anchors; addressed by content in image_prompt and motion_text",
+    "videos": "Seedance motion transfer, action grammar, camera language; first/last frames are extracted for long-shot chaining",
+    "audio": "Seedance voice timbre cloning, emotional delivery, rhythm, ambience/SFX matching"
+  }
+}

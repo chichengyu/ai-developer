@@ -1,0 +1,56 @@
+# Build / packaging artefacts (skill itself; not the projects built with it)
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+env/
+
+# Node / Tauri
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Rust / Cargo
+target/
+Cargo.lock.bak
+
+# .NET / Visual Studio
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+.vscode/
+
+# Generated bindings
+*.gen.*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Signing
+*.pfx
+*.p12
+*.key
+*.pem

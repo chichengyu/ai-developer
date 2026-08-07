@@ -1,0 +1,30 @@
+{
+  "series_slug": null,
+  "continuity_version": 1,
+  "episodes": ["EP01"],
+  "last_episode": "EP01",
+  "model_default": "current",
+  "flow_mode": "manual",
+  "engine_overrides": {},
+  "characters": {
+    "lin-mu": {
+      "name": "林暮",
+      "seed": 1001,
+      "refs": [
+        "episodes/EP01/assets/characters/lin_mu_front.png",
+        "episodes/EP01/assets/characters/lin_mu_three_quarter.png"
+      ],
+      "voice_id": "lin-mu-voice"
+    }
+  },
+  "scenes": {
+    "s1": {
+      "name": "山门石阶",
+      "seed": 2001,
+      "refs": [
+        "episodes/EP01/assets/scenes/s1_wide.png",
+        "episodes/EP01/assets/scenes/s1_detail.png"
+      ]
+    }
+  }
+}

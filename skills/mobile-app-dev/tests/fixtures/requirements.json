@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "appName": "MyApp",
+    "bundleId": "com.example.myapp",
+    "owner": "Engineering Team",
+    "targetShip": "2026-12-31"
+  },
+  "functional": {
+    "description": "Simple todo app with offline sync.",
+    "screens": ["List", "Detail", "Settings"],
+    "offlineFirst": true
+  },
+  "nonFunctional": {
+    "coldStartMs": 1500,
+    "memoryMb": 150,
+    "dynamicType": true,
+    "darkMode": true,
+    "locales": ["en"]
+  },
+  "distribution": {
+    "appStore": true,
+    "playStore": true,
+    "testflight": true
+  },
+  "integration": {
+    "apiSurface": "REST",
+    "auth": "OAuth 2.0",
+    "frameworks": ["push", "camera"],
+    "minIos": "16.0",
+    "minAndroidApi": 26
+  },
+  "failureModes": {
+    "offlineBehavior": "queued",
+    "permissionDenied": "graceful"
+  },
+  "compliance": {
+    "privacyLabels": true,
+    "dataSafetyForm": true,
+    "kids": false
+  },
+  "ops": {
+    "crashReporting": "Sentry",
+    "analytics": "Amplitude",
+    "featureFlags": "LaunchDarkly",
+    "ci": "GitHub Actions"
+  },
+  "teamProfile": {
+    "languages": ["TypeScript"],
+    "existingCodebases": ["React", "web"],
+    "hiringBudget": "low"
+  },
+  "category": "B",
+  "showstoppers": [
+    "Requires iOS 16+ and Android 8+",
+    "No offline editing of items created by other users in last 7 days"
+  ]
+}

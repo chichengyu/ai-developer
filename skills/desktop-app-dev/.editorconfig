@@ -1,0 +1,48 @@
+# EditorConfig: https://editorconfig.org
+# Top-level config; per-language overrides below.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{md,markdown}]
+trim_trailing_whitespace = false   # Markdown: two trailing spaces == hard line break
+
+[*.{yaml,yml}]
+indent_size = 2
+
+[*.{json,toml}]
+indent_size = 2
+
+[*.{ps1,psm1}]
+# PowerShell: most teams use 4 spaces; some prefer tabs. We standardise
+# on 4 spaces to match the OpenBSD style guide.
+end_of_line = crlf                  # Windows PowerShell convention
+indent_size = 4
+
+[*.{bat,cmd}]
+end_of_line = crlf
+indent_size = 4
+
+[*.{sh,bash}]
+end_of_line = lf
+indent_size = 4
+
+[*.{swift,dart,kt,kts}]
+indent_size = 4
+
+[*.{cs,xaml}]
+indent_size = 4
+
+[*.go]
+indent_style = tab
+indent_size = 4
+
+[Makefile]
+indent_style = tab
