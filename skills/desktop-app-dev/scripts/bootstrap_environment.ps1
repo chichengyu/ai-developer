@@ -1,0 +1,132 @@
+# bootstrap_environment.ps1 -- detect and install the toolchain for a framework.
+#
+# Usage:
+#   powershell -File scripts/bootstrap_environment.ps1 -Framework python -DryRun
+#   powershell -File scripts/bootstrap_environment.ps1 -Framework tauri -Install
+#   powershell -File scripts/bootstrap_environment.ps1 -Brief brief.json -Install
+#
+# Auto selection runs scripts/select_framework.py against the brief and
+# installs the winning framework's toolchain. Install actions use winget
+# and pip, so they need network access and user consent.
+
+[CmdletBinding()]
+param(
+    [string] $Framework = "auto",
+    [string] $Brief = "",
+    [switch] $Install,
+    [switch] $DryRun,
+    [string[]] $PythonPackages = @()
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$map = Get-Content -LiteralPath (Join-Path $root "toolchain_map.json") -Raw | ConvertFrom-Json
+
+function Resolve-Python {
+    $py = $env:CODEX_PYTHON
+    if (-not $py) { $py = "C:\Users\xc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" }
+    if (-not (Test-Path -LiteralPath $py)) { $py = (Get-Command python -ErrorAction SilentlyContinue).Source }
+    if (-not $py) { throw "python not found; set CODEX_PYTHON or add python to PATH." }
+    return $py
+}
+
+function Test-Toolchain {
+    param($Toolchain)
+    if (-not $Toolchain -or -not $Toolchain.check -or $Toolchain.check.Count -eq 0) {
+        return $false
+    }
+    if ($Toolchain.check[0] -eq "python") {
+        try {
+            return [bool](Resolve-Python)
+        } catch {
+            return $false
+        }
+    }
+    $cmd = $Toolchain.check[0]
+    $args = @($Toolchain.check | Select-Object -Skip 1)
+    $found = Get-Command $cmd -ErrorAction SilentlyContinue
+    if (-not $found) { return $false }
+    try {
+        & $found.Source @args *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Install-Toolchain {
+    param($Toolchain)
+    if (-not $Toolchain.winget) {
+        Write-Warning "No winget package for $($Toolchain.name); install manually."
+        return $false
+    }
+    Write-Host "==> winget install $($Toolchain.winget)" -ForegroundColor Cyan
+    winget install --id $Toolchain.winget --accept-source-agreements --accept-package-agreements
+    return $LASTEXITCODE -eq 0
+}
+
+if ($Framework -eq "auto") {
+    if (-not $Brief) {
+        throw "Auto selection requires -Brief <requirements.json|yaml>."
+    }
+    $py = Resolve-Python
+    $json = & $py (Join-Path $root "select_framework.py") --json $Brief | ConvertFrom-Json
+    $Framework = $json.ranked[0].framework
+    Write-Host "Auto-selected framework: $Framework" -ForegroundColor Green
+}
+
+if (-not $map.framework_toolchains.$Framework) {
+    throw "Unknown framework or language: $Framework"
+}
+
+$toolchainNames = @($map.framework_toolchains.$Framework)
+$missing = @()
+foreach ($name in $toolchainNames) {
+    $tc = $map.toolchains.$name
+    if (-not $tc) {
+        Write-Warning "No toolchain definition for '$name'."
+        continue
+    }
+    if (Test-Toolchain $tc) {
+        Write-Host "  [OK] $($tc.name)" -ForegroundColor Green
+    } else {
+        $missing += $name
+        $installHint = if ($tc.winget) { "winget install $($tc.winget)" } else { "manual install" }
+        Write-Host "  [MISSING] $($tc.name) -> $installHint" -ForegroundColor Yellow
+        if ($Install) {
+            $ok = Install-Toolchain $tc
+            if ($ok -and (Test-Toolchain $tc)) {
+                Write-Host "  [OK after install] $($tc.name)" -ForegroundColor Green
+            } else {
+                Write-Warning "Still missing after install: $($tc.name)"
+            }
+        }
+    }
+}
+
+$needPython = $toolchainNames -contains "python"
+$allPackages = @()
+if ($needPython) { $allPackages += @($map.toolchains.python.packages) }
+$allPackages += $PythonPackages
+if ($Install -and $allPackages.Count -gt 0 -and (Test-Toolchain $map.toolchains.python)) {
+    $py = Resolve-Python
+    Write-Host "==> pip install $($allPackages -join ' ')" -ForegroundColor Cyan
+    & $py -m pip install $allPackages
+    if ($LASTEXITCODE -ne 0) { Write-Warning "pip install failed for: $($allPackages -join ' ')" }
+}
+
+if ($DryRun) {
+    Write-Host ""
+    Write-Host "Dry run finished; no changes were made." -ForegroundColor Cyan
+    exit 0
+}
+
+if ($missing.Count -gt 0 -and -not $Install) {
+    Write-Host ""
+    Write-Host "Missing toolchains: $($missing -join ', '). Re-run with -Install." -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Environment bootstrap complete." -ForegroundColor Green
+exit 0

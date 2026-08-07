@@ -24,7 +24,7 @@ cd tests
 .\smoke_windows.ps1
 ```
 
-Expected output: `Passed: 43   Failed: 0` (varies slightly as scripts
+Expected output: `Passed: 45   Failed: 0` (varies slightly as scripts
 are added).
 
 ### macOS

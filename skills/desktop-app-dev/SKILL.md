@@ -284,6 +284,22 @@ If the user specifies a hard distribution constraint, narrow the matrix first:
 | **Auto-update channel** | Velopack (any), Squirrel (Electron, C#), WinSparkle (C++/Qt) |
 | **Cross-platform + single codebase** | Tauri, .NET MAUI, Avalonia, Electron, Flutter Desktop, Qt, Wails, Fyne, Gio, Compose Multiplatform, Neutralino.js |
 
+### Step 2.5 -- Bootstrap the toolchain (optional)
+
+After the framework is selected, install the matching SDK / toolchain:
+
+```powershell
+powershell -File scripts/bootstrap_environment.ps1 -Brief brief.json -DryRun
+powershell -File scripts/bootstrap_environment.ps1 -Brief brief.json -Install
+powershell -File scripts/bootstrap_environment.ps1 -Framework python -Install
+```
+
+`-Brief` auto-selects the framework with `scripts/select_framework.py`;
+`-Framework` accepts a framework or language key directly. The
+framework-to-toolchain mapping lives in `scripts/toolchain_map.json`.
+Install actions use winget and pip, so they require network access and
+user approval.
+
 ---
 
 ## Step 3 -- Decompose into atomic tasks
@@ -607,7 +623,7 @@ confirm the 8 canonical cases still produce the expected winner.
 ## Tests (fixtures + smoke tests + CI)
 
 - `tests/smoke_windows.ps1` -- PowerShell parse, Python imports,
-  fixtures, arch check (43 / 43 currently pass on Windows).
+  fixtures, arch check (45 / 45 currently pass on Windows).
 - `tests/smoke_macos.sh` -- bash syntax, PowerShell parse, Python AST +
   const table, Swift `-parse` (skipped if toolchain absent).
 - `tests/smoke_linux.sh` -- bash syntax, Python AST + const table for the

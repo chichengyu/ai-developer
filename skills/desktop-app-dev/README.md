@@ -94,6 +94,8 @@ scripts/
   vk_table.json                   canonical key table for keyboard templates
   check_vk_tables.py              verifies Python template matches vk_table.json
   sign_windows.ps1 / sign_macos.sh code signing helpers
+  bootstrap_environment.ps1       detect/install toolchains (winget/pip)
+  toolchain_map.json              framework -> toolchain mapping
 
 templates/
   requirements_checklist.md       Step 0 fill-in

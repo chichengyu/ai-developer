@@ -127,6 +127,13 @@ WinUI 3 vs Avalonia), see `templates/gui_framework_decision_tree.md`.
 
 ## By task
 
+### I need to set up the dev environment
+
+Run `scripts/bootstrap_environment.ps1` with `-Brief brief.json` for
+auto framework selection, or `-Framework <key>` for a fixed framework.
+Use `-DryRun` first, then `-Install` to install via winget / pip. The
+framework-to-toolchain mapping is in `scripts/toolchain_map.json`.
+
 ### I need to package for distribution
 
 | Target            | Script                          |

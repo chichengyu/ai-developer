@@ -30,6 +30,7 @@ foreach ($t in Get-ChildItem test_*.py) {
 | `test_plan_project.py`                | requirements.md and tasks.md generation.                          |
 | `test_scaffold_project.py`            | Project skeleton generation for all frameworks.                  |
 | `test_store_metadata.py`              | Store metadata document generation.                               |
+| `test_setup_toolchain.py`             | Toolchain planning and check-only CLI smoke tests.                |
 
 ## What is NOT tested here
 

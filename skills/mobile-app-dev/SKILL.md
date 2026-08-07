@@ -297,6 +297,11 @@ proceeding to Step 2.
 Automated helper: `python scripts/select_framework.py requirements.json`
 applies the same decision tree and prints a JSON result.
 
+Environment helper: `python scripts/setup_toolchain.py --requirements
+requirements.json` checks the SDK/toolchain for the selected framework.
+Review `--check-only` output first, then add `--install` to run the
+generated install commands.
+
 ---
 
 ## Step 2 -- Decompose into atomic tasks

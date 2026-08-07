@@ -106,6 +106,7 @@ scripts/
   scaffold_project.py             project skeleton generator
   generate_store_metadata.py      store metadata drafts
   verify_mobile.ps1               smoke checks + verification report
+  setup_toolchain.py              check/install SDK + toolchains
 
 examples/                         minimal runnable projects
   swiftui-counter/                SwiftUI + @Observable + Task
@@ -148,6 +149,9 @@ tests/                            smoke-test fixtures + runners
 2. Run Step 1.5 from `SKILL.md` (the auto-select algorithm).
    - For full decision tree, see `references/auto_selection.md`.
    - Or automate: `python scripts/select_framework.py requirements.json`.
+   - Then check/install the environment:
+     `python scripts/setup_toolchain.py --requirements requirements.json
+     --check-only`; add `--install` after reviewing the commands.
 3. Once the framework is picked, jump to its deep-dive reference:
    - `references/ios_deep_dive.md` (Swift + SwiftUI)
    - `references/android_deep_dive.md` (Kotlin + Compose)

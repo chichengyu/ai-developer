@@ -79,6 +79,13 @@ Get-ChildItem "$scriptsDir" -Filter "sign_*.ps1" | ForEach-Object {
         -not $errors
     }
 }
+Get-ChildItem "$scriptsDir" -Filter "bootstrap_*.ps1" | ForEach-Object {
+    Run-Test "$($_.Name) parse" {
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+        -not $errors
+    }
+}
 
 # 2. Python import smoke test
 Write-Host ""
@@ -128,8 +135,12 @@ print('OK')
 Write-Host ""
 Write-Host "--- fixtures ---"
 if ($py) {
-    Run-Test "sample_config.json" {
-        & $py -c "import json; json.load(open(r'$root\tests\fixtures\sample_config.json', encoding='utf-8'))"
+    Run-Test "sample_config.json + toolchain_map.json + sample_brief.json" {
+        & $py -c "import json; [json.load(open(p, encoding='utf-8')) for p in [r'$root\tests\fixtures\sample_config.json', r'$root\scripts\toolchain_map.json', r'$root\tests\fixtures\sample_brief.json']]"
+        $LASTEXITCODE -eq 0
+    }
+    Run-Test "bootstrap_environment.ps1 dry-run (python)" {
+        powershell -ExecutionPolicy Bypass -File "$root\scripts\bootstrap_environment.ps1" -Framework python -DryRun 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
     }
     Run-Test "C# template compile (dotnet, skipped if absent)" {

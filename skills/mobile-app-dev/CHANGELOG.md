@@ -23,6 +23,9 @@
 - `templates/wearable_decision_tree.md` plus watchOS, visionOS, and
   Wear OS starter examples.
 - Smoke tests for the new Python tools.
+- `scripts/setup_toolchain.py` -- checks or installs the SDK and
+  toolchain for the selected framework (`--check-only` by default,
+  `--install` opt-in).
 
 ## 1.0.1 -- 2026-08-07
 
