@@ -1,4 +1,4 @@
-﻿# ai-developer-skill — Java 开发者 Codex 技能套件
+﻿# ai-developer-skill — AI开发者 Codex 技能套件
 
 <p align="center">
   <img src="https://img.shields.io/badge/Java-17%2B-orange?logo=openjdk&logoColor=white" />
@@ -10,7 +10,7 @@
 
 ## 项目简介
 
-**ai-developer-skill** 是一套专为 Java 开发者打造的 Codex 技能集合，旨在提升 Codex 在 Java 项目中的数据库分析、研发现控和输出压缩能力。本套件包含七个可独立安装的技能：
+**ai-developer-skill** 是一套专为 AI开发者打造的 Codex 技能集合，旨在提升 Codex 在 Java 项目中的数据库分析、研发现控和输出压缩能力。本套件包含七个可独立安装的技能：
 
 | 技能 | 角色 | 关键能力 |
 |------|------|----------|
