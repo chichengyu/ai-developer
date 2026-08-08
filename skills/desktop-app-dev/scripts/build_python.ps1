@@ -1,12 +1,12 @@
 # build_python.ps1 -- PyInstaller packaging for a Python desktop app.
 #
-# Resolution order for the Python executable:
-#   1. -PythonExe parameter (explicit override)
-#   2. $env:CODEX_PYTHON / $env:PYTHON  (env vars)
-#   3. Codex primary runtime at C:\Users\xc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe
-#   4. python / python3 / py -3 on PATH
+# Python resolution is shared with the other skill scripts via
+# scripts/find_python.ps1 (Get-ProjectPython):
+#   -PythonExe -> CODEX_PYTHON -> PYTHON -> Codex runtime -> PATH.
 #
 # Usage: powershell -ExecutionPolicy Bypass -File build_python.ps1 -Entry app.py -Name MyApp
+#        powershell -ExecutionPolicy Bypass -File build_python.ps1 -Entry app.py -Name MyApp -BackupSource
+#        powershell -ExecutionPolicy Bypass -File build_python.ps1 -Entry app.py -Name MyApp -Install
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $Entry,
@@ -17,36 +17,23 @@ param(
     [string] $PythonExe = "",        # blank => auto-resolve
     [ValidateSet("auto", "x64", "arm64", "x86")]
     [string] $Arch = "auto",         # PyInstaller is host-bound; "auto" uses host arch
-    [string] $OutDir = "dist"
+    [string] $OutDir = "dist",
+    [switch] $BackupSource,          # timestamped source zip before packaging
+    [switch] $Install                # install missing PyInstaller; default is check-only
 )
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "find_python.ps1")
+
 function Resolve-Python {
     param([string]$Explicit)
-    $candidates = @()
-
-    if ($Explicit) { $candidates += $Explicit }
-    if ($env:CODEX_PYTHON) { $candidates += $env:CODEX_PYTHON }
-    if ($env:PYTHON)        { $candidates += $env:PYTHON }
-
-    # Codex primary runtime (well-known location)
-    $codexRt = "C:\Users\xc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-    if (Test-Path $codexRt) { $candidates += $codexRt }
-
-    # PATH fallbacks
-    foreach ($name in @("python","python3","py")) {
-        $p = Get-Command $name -ErrorAction SilentlyContinue
-        if ($p) { $candidates += $p.Source }
+    $py = Get-ProjectPython -Explicit $Explicit
+    if (-not $py) {
+        throw "No Python interpreter found. Set -PythonExe, CODEX_PYTHON, or PYTHON, or install Python on PATH."
     }
-
-    foreach ($c in $candidates) {
-        if ($c -and (Test-Path $c)) {
-            Write-Host "==> Using Python: $c" -ForegroundColor Cyan
-            return $c
-        }
-    }
-    throw "No Python interpreter found. Set -PythonExe, CODEX_PYTHON, or PYTHON, or install Python on PATH."
+    Write-Host "==> Using Python: $py" -ForegroundColor Cyan
+    return $py
 }
 
 $py = Resolve-Python -Explicit $PythonExe
@@ -76,9 +63,21 @@ if ($Arch -ne "auto") {
     }
 }
 
+if ($BackupSource) {
+    Write-Host "==> Backing up source before packaging" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "backup_source.ps1") `
+        -SourcePath (Get-Location).Path `
+        -OutputDir (Join-Path $OutDir "source_backup") `
+        -Name $Name
+    if ($LASTEXITCODE -ne 0) { throw "Source backup failed" }
+}
+
 # Ensure PyInstaller is available
 & $py -c "import PyInstaller" 2>$null
 if ($LASTEXITCODE -ne 0) {
+    if (-not $Install) {
+        throw "PyInstaller is not installed. Run with -Install to install it, or run: $py -m pip install pyinstaller"
+    }
     Write-Host "==> Installing PyInstaller" -ForegroundColor Cyan
     & $py -m pip install --upgrade pip
     & $py -m pip install pyinstaller

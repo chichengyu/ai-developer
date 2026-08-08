@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scraper Unblocker"
+  short_description: "Diagnose and resolve common web scraping blocks"
+  default_prompt: "Use $scraper-unblocker to build a scraper for this site and fix any blocks it hits."

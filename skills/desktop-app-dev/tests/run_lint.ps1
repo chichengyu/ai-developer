@@ -8,20 +8,21 @@
 #     bash tests/smoke_macos.sh
 #
 # Usage (Windows):
-#     pwsh ./tests/run_lint.ps1
+#     powershell -File tests/run_lint.ps1                  # check-only
+#     powershell -File tests/run_lint.ps1 -InstallDeps     # install missing ruff/mypy
 
 [CmdletBinding()]
 param(
     [switch] $SkipSmoke,
     [switch] $SkipMyPy,
-    [switch] $SkipRuff
+    [switch] $SkipRuff,
+    [switch] $InstallDeps
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$py = $env:CODEX_PYTHON
-if (-not $py) { $py = "C:\Users\xc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" }
-if (-not (Test-Path $py)) { $py = (Get-Command python -ErrorAction SilentlyContinue).Source }
+. (Join-Path $root "scripts/find_python.ps1")
+$py = Get-ProjectPython
 if (-not $py) { Write-Host "python not found" -ForegroundColor Red; exit 1 }
 
 function Step($name, $block) {
@@ -34,24 +35,37 @@ function Step($name, $block) {
     Write-Host "  [OK]   $name" -ForegroundColor Green
 }
 
+function Ensure-Tool {
+    param([string] $Module, [string] $Version)
+    & $py -c "import $Module" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        if (-not $InstallDeps) {
+            Write-Host "  [MISSING] $Module==$Version. Re-run with -InstallDeps or run: & `"$py`" -m pip install `"$Module==$Version`"" -ForegroundColor Yellow
+            exit 1
+        }
+        & $py -m pip install --quiet "$Module==$Version"
+        if ($LASTEXITCODE -ne 0) { throw "pip install failed for $Module==$Version" }
+    }
+}
+
 Push-Location $root
 try {
+    $psShell = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    if (-not $psShell) { $psShell = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
+    if (-not $psShell) { throw "PowerShell not found for tests/test_arch_awareness.ps1" }
     if (-not $SkipRuff) {
+        Ensure-Tool "ruff" "0.6.9"
         Step "ruff check" {
-            & $py -m pip install --quiet "ruff==0.6.9"
             & $py -m ruff check scripts/ tests/ examples/
         }
         Step "ruff format --check" {
-            & $py -m ruff format --check scripts/
+            & $py -m ruff format --check scripts/ tests/ examples/
         }
     }
     if (-not $SkipMyPy) {
+        Ensure-Tool "mypy" "1.13.0"
         Step "mypy scripts/" {
-            & $py -m pip install --quiet "mypy==1.13.0"
-            & $py -m mypy scripts/ 2>$null
-            # intentional: many scripts use untyped ctypes; surface
-            # warnings without failing the build (matches CI).
-            $true
+            & $py -m mypy scripts/
         }
     }
     if (-not $SkipSmoke) {
@@ -59,7 +73,7 @@ try {
             & ./tests/smoke_windows.ps1 2>&1 | Out-Null
         }
         Step "tests/test_arch_awareness.ps1" {
-            & pwsh -ExecutionPolicy Bypass -File ./tests/test_arch_awareness.ps1 2>&1 | Out-Null
+            & $psShell -NoProfile -ExecutionPolicy Bypass -File ./tests/test_arch_awareness.ps1 2>&1 | Out-Null
         }
     }
 } finally {

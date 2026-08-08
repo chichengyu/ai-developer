@@ -54,8 +54,8 @@ void init(const std::wstring& feedUrl,
     // WinSparkle takes narrow (UTF-8) strings; we hold wide in the API.
     // wcstombs via std::wstring_convert, or just hard-code narrow when known.
     win_sparkle_set_appcast_url(to_narrow(feedUrl).c_str());
-    win_sparkle_set_app_name(appName.c_str());
-    win_sparkle_set_app_version(appVersion.c_str());
+    win_sparkle_set_app_name(to_narrow(appName).c_str());
+    win_sparkle_set_app_version(to_narrow(appVersion).c_str());
 
     // Optional: code-sign public key (Ed25519). Empty for unsigned dev builds.
     if (!signature.empty()) {
@@ -100,4 +100,3 @@ int main(int argc, char** argv) {
     return app.exec();
 }
 #endif
-

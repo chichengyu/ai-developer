@@ -13,7 +13,7 @@ Usage  :
 
 Why this exists
     The Step 2 matrix in SKILL.md and the deeper notes in
-    references/framework_matrix.md cover 23 frameworks. Humans routinely
+    references/framework_matrix.md cover 24 frameworks. Humans routinely
     pick the wrong one because they read only the matrix row that matches
     their known language. This selector walks every framework, scores it on
     every relevant dimension, and returns an evidence-backed ranking.
@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -59,6 +60,7 @@ FRAMEWORK_LANGUAGES: dict[str, tuple[str, ...]] = {
     "wails": ("go", "javascript", "typescript"),
     "fyne": ("go",),
     "gio": ("go",),
+    "walk": ("go",),
     "compose_multiplatform": ("kotlin",),
     "javafx": ("java", "kotlin"),
     "tornadofx": ("kotlin",),
@@ -564,6 +566,35 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "binary_native_aot": 1.0,
         "threading_quality": 0.6,
     },
+    "walk": {
+        "windows_support": 1.0,
+        "macos_support": -1.0,
+        "linux_support": -1.0,
+        "win_x64_arch": 1.0,
+        "win_arm64_arch": 0.8,
+        "win_x86_arch": 0.8,
+        "macos_arm64_arch": -1.0,
+        "linux_arm64_arch": -1.0,
+        "exe_size_small": 1.0,
+        "exe_size_tiny": 1.0,
+        "cold_start_fast": 1.0,
+        "native_look_win11": 0.3,
+        "native_look_macos": -1.0,
+        "native_look_linux": -1.0,
+        "sendinput_friendly": 1.0,
+        "win32_interop": 1.0,
+        "usb_serial_access": 0.8,
+        "web_ui_support": 0.0,
+        "single_file_output": 1.0,
+        "store_distribution": 0.0,
+        "auto_update": 0.0,
+        "ecosystem_maturity": 0.4,
+        "dev_speed": 0.6,
+        "long_term_maintenance": 0.5,
+        "oss_only": 1.0,
+        "binary_native_aot": 1.0,
+        "threading_quality": 0.7,
+    },
     "compose_multiplatform": {
         "windows_support": 0.7,
         "macos_support": 0.7,
@@ -787,6 +818,7 @@ DISPLAY_NAMES: dict[str, str] = {
     "wails": "Go Wails (web frontend)",
     "fyne": "Go Fyne (native widgets)",
     "gio": "Go Gio (immediate mode)",
+    "walk": "Go walk (Win32 native)",
     "compose_multiplatform": "Kotlin Compose Multiplatform",
     "javafx": "JavaFX / TornadoFX",
     "tornadofx": "Kotlin TornadoFX (JavaFX DSL)",
@@ -1064,6 +1096,7 @@ RATIONALES = {
     "wails": "Go backend with web frontend; lighter than Electron.",
     "fyne": "Pure-Go native widgets; best cross-platform Go choice for simple UIs.",
     "gio": "Immediate-mode GPU-driven UI; great for tools with heavy rendering.",
+    "walk": "Windows-only native Go UI; smallest Go option for Win32 tools.",
     "compose_multiplatform": "Modern declarative UI shared across Windows / macOS / Linux; expect some rough edges.",
     "javafx": "Pick if the team is already a JVM shop and you want charts + 3D.",
     "tornadofx": "Kotlin DSL on JavaFX; good for JVM shops that prefer Kotlin syntax.",
@@ -1119,7 +1152,9 @@ def explain_top(scores, req):
 
 def load_brief(path):
     """Load a JSON or simple YAML brief from path or stdin."""
-    text = sys.stdin.read() if path is None else Path(path).read_text(encoding="utf-8")
+    text = sys.stdin.read() if path is None else Path(path).read_text(encoding="utf-8-sig")
+    if text.startswith("\ufeff"):
+        text = text[1:]
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -1132,21 +1167,103 @@ def load_brief(path):
                 continue
             key, _, value = line.partition(":")
             value = value.strip()
+            if not value:
+                continue
             if value.startswith("[") and value.endswith("]"):
-                inner = value[1:-1].strip()
-                if inner:
-                    out[key.strip()] = [v.strip().strip("\"'") for v in inner.split(",")]
-                else:
-                    out[key.strip()] = []
+                try:
+                    out[key.strip()] = json.loads(value)
+                except json.JSONDecodeError:
+                    inner = value[1:-1].strip()
+                    out[key.strip()] = (
+                        [v.strip().strip("\"'") for v in inner.split(",")] if inner else []
+                    )
             elif value.lower() in ("true", "false"):
                 out[key.strip()] = value.lower() == "true"
-            elif value:
+            elif value.lower() in ("null", "none", "~"):
+                out[key.strip()] = None
+            else:
                 out[key.strip()] = value.strip().strip("\"'")
         return out
 
 
+def validate_tables() -> list[str]:
+    """Structural invariant checks for the scoring tables and toolchain map."""
+    errors: list[str] = []
+    dims = set(DIMS)
+    for name, dims_map in FRAMEWORKS.items():
+        if set(dims_map) != dims:
+            missing = sorted(dims - set(dims_map))
+            extra = sorted(set(dims_map) - dims)
+            if missing:
+                errors.append(f"{name}: missing dimensions {missing}")
+            if extra:
+                errors.append(f"{name}: extra dimensions {extra}")
+        for dim, value in dims_map.items():
+            if not isinstance(value, int | float) or not -1.0 <= value <= 1.0:
+                errors.append(f"{name}.{dim}: score {value!r} outside [-1, 1]")
+
+    for table_name, table in (
+        ("FRAMEWORK_LANGUAGES", FRAMEWORK_LANGUAGES),
+        ("DISPLAY_NAMES", DISPLAY_NAMES),
+        ("RATIONALES", RATIONALES),
+    ):
+        missing = sorted(set(FRAMEWORKS) - set(table))
+        extra = sorted(set(table) - set(FRAMEWORKS))
+        if missing:
+            errors.append(f"{table_name}: missing frameworks {missing}")
+        if extra:
+            errors.append(f"{table_name}: extra frameworks {extra}")
+
+    try:
+        toolchain_map = json.loads(
+            (Path(__file__).resolve().parent / "toolchain_map.json").read_text(encoding="utf-8")
+        )
+        missing = sorted(set(FRAMEWORKS) - set(toolchain_map.get("framework_toolchains", {})))
+        if missing:
+            errors.append(f"toolchain_map.json: missing framework keys {missing}")
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"toolchain_map.json unreadable: {exc}")
+    return errors
+
+
 def self_test():
     """Regression test: verify canonical requirements produce expected picks."""
+    with tempfile.TemporaryDirectory() as tmp:
+        brief_path = Path(tmp) / "brief.yaml"
+        brief_path.write_text(
+            'target_os: [["windows", "x64"], ["macos", "arm64"]]\n'
+            "team_languages: [python, csharp]\n"
+            "web_ui_required: false\n",
+            encoding="utf-8",
+        )
+        loaded = load_brief(brief_path)
+        if loaded.get("target_os") != [["windows", "x64"], ["macos", "arm64"]]:
+            print("  [FAIL] yaml brief load: nested target_os")
+            return 1
+        if loaded.get("team_languages") != ["python", "csharp"]:
+            print("  [FAIL] yaml brief load: team_languages")
+            return 1
+        if loaded.get("web_ui_required") is not False:
+            print("  [FAIL] yaml brief load: bool")
+            return 1
+        print("  [OK]   yaml brief load")
+
+        bom_path = Path(tmp) / "brief-bom.json"
+        bom_path.write_text(
+            "\ufeff" + json.dumps({"target_os": [["windows", "x64"]]}),
+            encoding="utf-8",
+        )
+        bom_loaded = load_brief(bom_path)
+        assert bom_loaded.get("target_os") == [["windows", "x64"]]
+        print("  [OK]   bom json brief load")
+
+    invariant_errors = validate_tables()
+    for error in invariant_errors:
+        print(f"  [FAIL] {error}")
+    if invariant_errors:
+        return 1
+    print(f"  [OK]   framework tables: {len(FRAMEWORKS)} frameworks x {len(DIMS)} dimensions")
+
     cases = [
         # Windows-only, SendInput, C# team -> WPF (DataBinding + Win32 interop).
         (

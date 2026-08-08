@@ -228,9 +228,14 @@ What goes in:
 - Navigation (menu / sidebar / tabs)
 - Theming (light + dark if cross-platform)
 - Layout that survives window resize down to 800x600
+- UI hard requirements UI-01..UI-18 from
+  `references/ui_hard_requirements.md` (tokens, one-table pages,
+  pagination, tooltips, theme center + download URL, settings
+  persistence, log center, semantic colors)
 
 Acceptance: app launches, shows the empty shell, resizes cleanly,
-respects Windows theme.
+respects Windows theme, and passes every UI-01..UI-18 acceptance check
+that is not explicitly waived.
 
 #### T5 -- Feature tasks (one per feature)
 

@@ -43,6 +43,33 @@ coding starts. Items marked **required** must be answered. Items marked
 | F-IMP-11 | Clean shutdown on logoff | Trap `WM_QUERYENDSESSION` | |
 | F-IMP-12 | Uninstall cleanup | Remove app data on uninstall | |
 
+### 1.3 界面硬性要求（UI hard requirements）
+
+All UI-01..UI-18 items in `references/ui_hard_requirements.md` are
+mandatory unless explicitly waived below. Fill in the waiver or the
+page / acceptance evidence for each item.
+
+| ID | 硬性要求 | Default | Waiver / acceptance |
+|---|---|---|---|
+| UI-01 | 全局配色统一，默认模仿 Codex 界面 | required | |
+| UI-02 | 全局控件样式统一 | required | |
+| UI-03 | 文字与背景鲜明对比 | required | |
+| UI-04 | 布局对齐一致，溢出滚动或换行 | required | |
+| UI-05 | 右侧单表格，多表格另开页面 | required | |
+| UI-06 | 不重复页面标题 | required | |
+| UI-07 | 管理列表底部分页 | required | |
+| UI-08 | 省略号悬停显示完整内容 | required | |
+| UI-09 | 行操作栏与右键菜单支持自动刷新间隔 | required | |
+| UI-10 | 主题中心 + 下载地址 + 刷新 + 下载后按钮变“应用” | required | |
+| UI-11 | 所有选项去重 | required | |
+| UI-12 | 用户配置持久化 | required | |
+| UI-13 | 左侧日志入口 + 成功/失败日志详情 | required | |
+| UI-14 | 危险红/警告橙/成功绿/信息蓝 | required | |
+| UI-15 | 表单编辑提供示例 | required | |
+| UI-16 | 滚动条明显且图标显示 | required | |
+| UI-17 | 表格提示与搜索栏分行 | required | |
+| UI-18 | 重型桌面端界面，禁止 Web 化 | required | |
+
 ---
 
 ## 2. Non-functional requirements
@@ -120,3 +147,4 @@ requirement. The showstopper is verified first in Step 6.
 - [ ] User reviewed and accepted requirements
 - [ ] Showstopper is unambiguous
 - [ ] Every required field is filled
+- [ ] UI-01..UI-18 均已逐项填写或显式豁免（含原因与复审日期）

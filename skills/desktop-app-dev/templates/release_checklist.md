@@ -36,7 +36,11 @@ issue and tick each one.
 
 - [ ] Every task in `tasks.md` from Step 3 has its acceptance test passing.
 - [ ] The showstopper from Step 0 is verified one more time before sign-off.
+- [ ] `界面硬性要求` UI-01..UI-18 from
+  `references/ui_hard_requirements.md` pass on the target OS.
 - [ ] Settings persistence survives an uninstall + reinstall cycle.
+- [ ] Media runtime one-click install verified on a clean machine
+  (Playwright + Chromium + ffmpeg / ffprobe + pycryptodome).
 - [ ] Auto-update: install v1.0.0, then publish v1.0.1 to the feed, the
   app must detect and offer the update without manual intervention.
 - [ ] Clean uninstall: no orphan files in `%APPDATA%` / `~/Library` /

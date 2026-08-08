@@ -1,13 +1,15 @@
 # tests/
 
-Three smoke tests + one structural test, all runnable locally and on
-GitHub Actions across Windows / macOS / Ubuntu.
+Three OS smoke suites plus doc, media-pipeline, BOM, and arch structural
+tests, all runnable locally and on GitHub Actions across Windows / macOS /
+Ubuntu.
 
 | Script                       | OS          | Purpose                                                  |
 |------------------------------|-------------|----------------------------------------------------------|
-| `smoke_windows.ps1`          | Windows     | PowerShell parse + Python imports + fixtures + arch check|
-| `smoke_macos.sh`             | macOS       | bash syntax + PowerShell parse + Python + Swift -parse  |
-| `smoke_linux.sh`             | Linux       | bash syntax + PowerShell parse + Python AST + const check|
+| `smoke_windows.ps1`          | Windows     | all .ps1 parse + Python imports + fixtures + source backup + platform flags + arch check + BOM/examples AST|
+| `test_no_bom.py`             | any         | BOM / U+FEFF regression scan across text files |
+| `smoke_macos.sh`             | macOS       | bash syntax + all .ps1 parse + Python + Swift -parse + doc/media tests|
+| `smoke_linux.sh`             | Linux       | bash syntax + all .ps1 parse + Python AST + doc/media tests|
 | `test_arch_awareness.ps1`    | Windows*    | Verifies every `build_*.ps1` has `-Arch` / `-Rid`        |
 
 `*` `test_arch_awareness.ps1` runs from PowerShell but uses the
@@ -24,7 +26,7 @@ cd tests
 .\smoke_windows.ps1
 ```
 
-Expected output: `Passed: 45   Failed: 0` (varies slightly as scripts
+Expected output: `Passed: 77   Failed: 0` (varies slightly as scripts
 are added).
 
 ### macOS
@@ -59,10 +61,11 @@ two `auto_update_*.ps1` parse checks).
 
 `.github/workflows/ci.yml` defines four jobs:
 
-- `lint`: runs `ruff check scripts/ tests/ examples/` on `ubuntu-22.04`
+- `lint`: runs `ruff check` + `ruff format --check` + `mypy scripts/`
+  on `ubuntu-22.04`
 - `test-windows`: runs `smoke_windows.ps1` on `windows-latest`
 - `test-macos`: runs `smoke_macos.sh` on `macos-latest`
-- `test-linux`: runs `smoke_linux.sh` on `ubuntu-latest`
+- `test-linux`: runs `smoke_linux.sh` on `ubuntu-22.04`
 
 Triggers on push to `main`, on PRs targeting `main`, and manual
 dispatch. Upload-on-failure artifact retention: 7 days.
@@ -73,7 +76,9 @@ dispatch. Upload-on-failure artifact retention: 7 days.
 tests/fixtures/
   sample.md              # Markdown input for T5.3-style converter tasks
   sample_config.json     # Default settings for a fresh app
+  sample_brief.json      # select_framework.py requirements brief
   AppxManifest.xml       # Minimal packaged-app manifest for MSIX
+  csharp-smoke/          # Optional dotnet build fixture
 ```
 
 These are static, OS-agnostic where possible, and small enough to be
@@ -85,6 +90,8 @@ read in a single screen.
   dedicated test machine, never in shared CI.
 - Real network roundtrips for Velopack / Squirrel upload.
 - Code-signing end-to-end (uses your cert locally).
+- Client wrapper compilation in C# / Go / Rust / Kotlin / Swift / Java /
+  C++ (no cross-language toolchain is installed in CI).
 - macOS / Linux runtime behavior of `sendinput_macos.py`,
   `window_enum_macos.py`, `sendinput_linux.py`, `window_enum_linux.py`
   -- the scripts parse + const-table check on each platform, but

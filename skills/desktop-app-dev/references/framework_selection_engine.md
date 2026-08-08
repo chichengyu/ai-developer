@@ -16,7 +16,7 @@ reproducible rationale. Three properties matter:
 2. **Defensible** -- the ranking can be explained dimension-by-dimension.
 3. **Tunable** -- adding a new framework is a single row in one table.
 
-The matrix in `SKILL.md` and the deep dive in `references/framework_matrix.md`
+The quick decision tree and the deep dive in `references/framework_matrix.md`
 are *narrative* answers to this question. The engine is a *quantitative*
 answer. When they disagree, the brief is the source of truth -- re-read it
 and decide which dimensions were weighted too heavily or too lightly.
@@ -35,6 +35,10 @@ A requirements brief is a JSON / YAML object with the fields in
 Without `team_languages`, the engine cannot break ties between, e.g.,
 WPF and tkinter for a Windows-only brief -- both fit. The team's existing
 skills are the tie-breaker.
+
+The built-in YAML loader accepts flat `key: value` lines only; nested values
+such as `target_os` must use inline JSON-style arrays
+(`target_os: [["windows", "x64"]]`), not indented block lists.
 
 ---
 

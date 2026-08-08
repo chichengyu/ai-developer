@@ -20,15 +20,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $PSScriptRoot "find_python.ps1")
 $map = Get-Content -LiteralPath (Join-Path $root "toolchain_map.json") -Raw | ConvertFrom-Json
-
-function Resolve-Python {
-    $py = $env:CODEX_PYTHON
-    if (-not $py) { $py = "C:\Users\xc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" }
-    if (-not (Test-Path -LiteralPath $py)) { $py = (Get-Command python -ErrorAction SilentlyContinue).Source }
-    if (-not $py) { throw "python not found; set CODEX_PYTHON or add python to PATH." }
-    return $py
-}
 
 function Test-Toolchain {
     param($Toolchain)
@@ -36,11 +29,7 @@ function Test-Toolchain {
         return $false
     }
     if ($Toolchain.check[0] -eq "python") {
-        try {
-            return [bool](Resolve-Python)
-        } catch {
-            return $false
-        }
+        return [bool](Get-ProjectPython)
     }
     $cmd = $Toolchain.check[0]
     $args = @($Toolchain.check | Select-Object -Skip 1)
@@ -69,7 +58,8 @@ if ($Framework -eq "auto") {
     if (-not $Brief) {
         throw "Auto selection requires -Brief <requirements.json|yaml>."
     }
-    $py = Resolve-Python
+    $py = Get-ProjectPython
+    if (-not $py) { throw "python not found; set CODEX_PYTHON or PYTHON, or add python to PATH." }
     $json = & $py (Join-Path $root "select_framework.py") --json $Brief | ConvertFrom-Json
     $Framework = $json.ranked[0].framework
     Write-Host "Auto-selected framework: $Framework" -ForegroundColor Green
@@ -81,6 +71,7 @@ if (-not $map.framework_toolchains.$Framework) {
 
 $toolchainNames = @($map.framework_toolchains.$Framework)
 $missing = @()
+$pipFailed = $false
 foreach ($name in $toolchainNames) {
     $tc = $map.toolchains.$name
     if (-not $tc) {
@@ -97,6 +88,7 @@ foreach ($name in $toolchainNames) {
             $ok = Install-Toolchain $tc
             if ($ok -and (Test-Toolchain $tc)) {
                 Write-Host "  [OK after install] $($tc.name)" -ForegroundColor Green
+                $missing = @($missing | Where-Object { $_ -ne $name })
             } else {
                 Write-Warning "Still missing after install: $($tc.name)"
             }
@@ -109,10 +101,13 @@ $allPackages = @()
 if ($needPython) { $allPackages += @($map.toolchains.python.packages) }
 $allPackages += $PythonPackages
 if ($Install -and $allPackages.Count -gt 0 -and (Test-Toolchain $map.toolchains.python)) {
-    $py = Resolve-Python
+    $py = Get-ProjectPython
     Write-Host "==> pip install $($allPackages -join ' ')" -ForegroundColor Cyan
     & $py -m pip install $allPackages
-    if ($LASTEXITCODE -ne 0) { Write-Warning "pip install failed for: $($allPackages -join ' ')" }
+    if ($LASTEXITCODE -ne 0) {
+        $pipFailed = $true
+        Write-Warning "pip install failed for: $($allPackages -join ' ')"
+    }
 }
 
 if ($DryRun) {
@@ -121,9 +116,9 @@ if ($DryRun) {
     exit 0
 }
 
-if ($missing.Count -gt 0 -and -not $Install) {
+if ($missing.Count -gt 0 -or $pipFailed) {
     Write-Host ""
-    Write-Host "Missing toolchains: $($missing -join ', '). Re-run with -Install." -ForegroundColor Yellow
+    Write-Host "Environment setup incomplete: missing toolchains ($($missing -join ', ')) or pip install failed. Re-run with -Install." -ForegroundColor Yellow
     exit 1
 }
 

@@ -6,6 +6,45 @@ this document is what to do after.
 
 ---
 
+## Distribution-first override
+
+If the user specifies a hard distribution constraint, narrow the framework
+matrix first:
+
+| Distribution | Viable frameworks |
+|---|---|
+| **Single-file portable EXE** (< 50 MB, no install) | Tauri, Rust+Slint, .NET 8 self-contained + R2R, NativeAOT, C++/Qt static, PyInstaller, Fyne, Gio, walk, Neutralino.js (TS+WebView2), Kotlin/Native (limited desktop UI) |
+| **MSI installer** | C#/.NET (WiX), C++/Qt (windeployqt + WiX), Tauri, Electron (electron-builder MSI) |
+| **MSIX** | C#/WinUI 3, C#/WPF (WAP), Tauri (MSIX target) |
+| **Microsoft Store** | C#/WinUI 3, C#/WPF (packaged), Electron, Tauri |
+| **Auto-update channel** | Velopack (any), Squirrel (Electron, C#), WinSparkle (C++/Qt) |
+| **Cross-platform + single codebase** | Tauri, .NET MAUI, Avalonia, Electron, Flutter Desktop, Qt, Wails, Fyne, Gio, Compose Multiplatform, Neutralino.js |
+
+## Architecture support matrix
+
+| Framework / script            | Win x64 | Win arm64 | Win x86 | macOS x64 | macOS arm64 | Linux x64 | Linux arm64 | Notes |
+|-------------------------------|:-------:|:---------:|:-------:|:---------:|:-----------:|:---------:|:-----------:|-------|
+| `build_dotnet.ps1`            |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | per-OS RID; default win-x64 |
+| `build_dotnet_nativeaot.ps1`  |   Y     |    -      |    -    |     -     |     -       |     -     |     -       | NativeAOT is win-x64 only |
+| `build_electron.ps1`          |   Y     |    Y      |    Y*   |     Y     |     Y       |     Y     |     Y       | `ia32` instead of `x86`     |
+| `build_qt.ps1`                |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | needs matching Qt toolchain |
+| `build_python.ps1`            |   Y     |    Y*     |    Y*   |     Y     |     Y*      |     Y     |     Y*      | PyInstaller is host-bound   |
+| `build_tauri.ps1`             |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | uses Rust target triples    |
+| `build_go_wails.ps1`          |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | `windows/{amd64,arm64,386}` |
+| `build_go_fyne.ps1`           |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | sets `GOOS`+`GOARCH`       |
+| `build_go_gio.ps1`            |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | sets `GOOS=...` + `GOARCH`  |
+| `build_kotlin_compose.ps1`    |   Y     |    Y*     |    Y*   |     Y     |     Y*      |     Y     |     Y*      | Compose Desktop arch        |
+| `build_swift.ps1`             |   Y     |    Y      |    -    |     Y     |     Y       |     Y*    |     Y*      | `--triple` per triple       |
+| `build_neutralino.ps1`        |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | arch follows WebView runtime|
+| `build_macos.ps1`             |   -     |    -      |    -    |     Y     |     Y       |     -     |     -       | macOS-only build helper     |
+| `build_linux.ps1`             |   -     |    -      |    -    |     -     |     -       |     Y     |     Y       | Linux-only build helper     |
+| `build_dmg.sh`                |   -     |    -      |    -    |     Y     |     Y       |     -     |     -       | DMG packaging               |
+| `build_appimage.sh`           |   -     |    -      |    -    |     -     |     -       |     Y     |     Y       | AppImage packaging          |
+| `build_deb.sh`                |   -     |    -      |    -    |     -     |     -       |     Y     |     Y       | .deb packaging              |
+
+`*` = supported by the toolchain but not yet verified at run time in this skill.
+
+## Python: PyInstaller
 ## Python: PyInstaller
 
 ### Single-file EXE

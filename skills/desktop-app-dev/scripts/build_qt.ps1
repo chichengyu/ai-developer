@@ -67,7 +67,13 @@ if (-not $exePath) { throw "Could not find $AppName.exe under $BuildDir" }
 
 # 4. windeployqt
 Write-Host "==> windeployqt" -ForegroundColor Cyan
-& (Join-Path $qtBin "windeployqt.exe") --release --qmldir (Join-Path $SourceDir "qml") $exePath
+$windeployArgs = @("--release")
+if (Test-Path (Join-Path $SourceDir "qml")) {
+    $windeployArgs += "--qmldir"
+    $windeployArgs += (Join-Path $SourceDir "qml")
+}
+$windeployArgs += $exePath
+& (Join-Path $qtBin "windeployqt.exe") @windeployArgs
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
 # 5. Optional installer via cpack

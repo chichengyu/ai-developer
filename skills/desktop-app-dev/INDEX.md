@@ -29,7 +29,8 @@ tkinter GUI that wraps `send_key` + `press_combo` + `WindowFinder`.
 
 Form, table, report, dashboard. Pick a framework from
 `references/framework_matrix.md`. After picking the framework, see
-"By framework" below.
+"By framework" below. Apply `references/ui_hard_requirements.md`
+(UI-01..UI-18) before declaring the UI done.
 
 ### System / DevOps tool (Category C)
 
@@ -45,11 +46,12 @@ Registry / service / driver / P/Invoke / COM. Start with
 | Hardware-level input (any Win32 app)    | `scripts/sendinput_python.py` (R1)   |
 
 See `references/win32_recipes.md` R13 for the priority order.
+Cross-platform deep dive: `references/accessibility_cross_platform.md`.
 
 ### Multimedia / GPU (Category D)
 
-T4 in `SKILL.md` mentions "GPU device enumeration" + "shader / asset
-pipeline"; framework matrix lists Vulkan / OpenGL candidates. No
+Step 3 variations in `SKILL.md` mention "GPU device enumeration" + "shader /
+asset pipeline"; framework matrix lists Vulkan / OpenGL candidates. No
 template files ship with the skill for this category -- it is too
 domain-specific.
 
@@ -62,7 +64,8 @@ domain-specific.
 - Build: any of 14 `scripts/build_*.ps1` (Tauri, dotnet, NativeAOT,
   Electron, Qt, Python, Go x3, Kotlin, Swift, Neutralino, macOS, Linux).
 - SendInput / window: 10-language `sendinput_*` + 9-language
-  `window_enum_*` set, plus macOS / Linux Python variants.
+  `window_enum_*` sets (12 files each incl. Java), plus macOS / Linux
+  Python variants.
 - Threading: `scripts/threading_wpf.cs`, `threading_winui.cs`,
   `threading_tkinter.py`, `threading_pyside6.py`, `threading_tauri.rs`,
   `threading_glib.py`, `threading_dispatch.swift`.
@@ -81,7 +84,8 @@ domain-specific.
   @MainActor).
 - Auto-update: `scripts/auto_update_sparkle.swift` (Sparkle 2.x).
 - Accessibility: UIA is not available on macOS; use the target app's
-  own AppleScript / accessibility API. (No template ships with the skill.)
+  own AppleScript / accessibility API. See
+  `references/accessibility_cross_platform.md`.
 
 ### Linux (glibc 2.31+)
 
@@ -91,7 +95,8 @@ domain-specific.
 - Window enum: `scripts/window_enum_linux.py` (X11 XQueryTree + EWMH).
 - Threading: `scripts/threading_glib.py` (GTK / GLib idle_add).
 - Auto-update: `scripts/auto_update_appimage.md` (AppImageUpdate / zsync).
-- Accessibility: AT-SPI2 (GNOME / KDE); no template ships with the skill.
+- Accessibility: AT-SPI2 (GNOME / KDE). See
+  `references/accessibility_cross_platform.md`.
 
 ---
 
@@ -112,10 +117,16 @@ you have picked one:
 | Tauri (Rust + Web)   | `scripts/build_tauri.ps1` | `scripts/threading_tauri.rs`   | `examples/tauri-threading/` |
 | Electron             | `scripts/build_electron.ps1` | NodeJS worker_threads        | -- |
 | Qt 6 (C++)           | `scripts/build_qt.ps1`    | QThread + signals             | -- |
-| C++/MFC raw          | -- (usesystem CMake)      | std::thread + PostMessage     | -- |
+| C++/MFC raw          | -- (uses system CMake)    | std::thread + PostMessage     | -- |
 | Go Wails             | `scripts/build_go_wails.ps1` | go func() + RunSafe          | -- |
 | Go Fyne              | `scripts/build_go_fyne.ps1` | go func() + fyne.Do           | -- |
 | Go Gio               | `scripts/build_go_gio.ps1`  | go func()                     | -- |
+| Rust + Slint         | `cargo build --release`      | `std::thread` + channel       | -- |
+| Rust + egui          | `cargo build --release`      | `std::thread` + channel       | -- |
+| Flutter Desktop      | Flutter SDK (no build script) | `Isolate.spawn` + Stream    | -- |
+| JavaFX               | JDK / Gradle (no build script) | `Task` + `Platform.runLater` | -- |
+| TornadoFX            | JDK / Gradle (no build script) | `runAsync` + JavaFX thread | -- |
+| walk (Go, Win32)     | `go build -ldflags "-H windowsgui"` | `walk.Window.RunSafe` | -- |
 | Compose Multiplatform (Kotlin) | `scripts/build_kotlin_compose.ps1` | launch + Dispatchers.Main | -- |
 | Swift / SwiftUI      | `scripts/build_swift.ps1` | Task + MainActor              | -- |
 | Neutralino.js        | `scripts/build_neutralino.ps1` | (N/A, JS event loop)       | -- |
@@ -133,6 +144,26 @@ Run `scripts/bootstrap_environment.ps1` with `-Brief brief.json` for
 auto framework selection, or `-Framework <key>` for a fixed framework.
 Use `-DryRun` first, then `-Install` to install via winget / pip. The
 framework-to-toolchain mapping is in `scripts/toolchain_map.json`.
+Build helpers accept the same `-Install` opt-in for missing CLIs.
+
+### I need UI / theme consistency
+
+Open `references/ui_hard_requirements.md` -- canonical UI-01..UI-18
+checklist, Codex-like default palette, semantic colors, theme library
+URLs, settings persistence, log center, and auto-refresh rules.
+
+### I need a media downloader / republisher
+
+Start at `references/media_acquisition_playbook.md`. Use
+`scripts/task_queue.py` for SQLite task persistence, then wire in
+`media_session.py`, `media_parser.py`, `media_downloader.py`,
+`hls_downloader.py`, `captcha_solver.py`, `browser_session.py`,
+`ffmpeg_transcoder.py`, and `platform_publisher.py`.
+For any other desktop UI language, run `scripts/media_pipeline_service.py`
+and use `clients/` wrappers or `references/media_pipeline_clients.md`
+to call it over HTTP.
+Install the runtime with `scripts/setup_media_dependencies.ps1 -Install`
+or `POST /deps/install`.
 
 ### I need to package for distribution
 
@@ -146,6 +177,11 @@ framework-to-toolchain mapping is in `scripts/toolchain_map.json`.
 | macOS .app / .dmg   | `scripts/build_macos.ps1` + `scripts/build_dmg.sh` |
 | Linux AppImage     | `scripts/build_appimage.sh`      |
 | Linux .deb         | `scripts/build_deb.sh`           |
+
+Before any packaging run, create a timestamped source zip with
+`scripts/backup_source.ps1`, or pass `-BackupSource` to
+`scripts/build_python.ps1` / `scripts/build_dotnet.ps1` so the backup runs
+automatically.
 
 ### I need to code-sign
 
@@ -195,6 +231,10 @@ I want a runnable demo I can adapt
 I want to package as EXE / .app / .AppImage
     --> scripts/build_<your-target>.ps1 (or .sh)
 
+I want to keep a source backup before packaging
+    --> scripts/backup_source.ps1
+        (or -BackupSource on build_python.ps1 / build_dotnet.ps1)
+
 I want offline / no-internet builds
     --> references/restricted_network_playbook.md
 
@@ -205,7 +245,7 @@ I want multi-arch (x64 / arm64 / x86)
 
 I want CI that runs on all 3 OSes
     --> .github/workflows/ci.yml
-        (windows-latest / macos-latest / ubuntu-latest)
+        (windows-latest / macos-latest / ubuntu-22.04)
 
 I want to know if I should NOT use this skill
     --> SKILL.md -> "When NOT to use this skill"

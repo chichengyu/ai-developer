@@ -9,6 +9,7 @@
 #   powershell -File build_macos.ps1 -Tool dotnet -Project src/MyApp -Arch arm64
 #   powershell -File build_macos.ps1 -Tool cargo  -Project src-tauri -Arch arm64
 #   powershell -File build_macos.ps1 -Tool xcode  -Project MyApp.xcodeproj -Arch arm64
+#   powershell -File build_macos.ps1 -Tool cargo  -Project src-tauri -Install
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [ValidateSet("dotnet","cargo","xcode")] [string] $Tool,
@@ -16,7 +17,8 @@ param(
     [ValidateSet("x64","arm64")]
     [string] $Arch = "arm64",
     [string] $Configuration = "Release",
-    [string] $OutputDir = "dist"
+    [string] $OutputDir = "dist",
+    [switch] $Install                  # install missing tauri-cli / Rust target; default is check-only
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,11 +47,18 @@ elseif ($Tool -eq "cargo") {
         throw "cargo not on PATH. Install Rust from https://rustup.rs"
     }
     if (-not (Get-Command cargo-tauri -ErrorAction SilentlyContinue)) {
+        if (-not $Install) {
+            throw "cargo-tauri is not installed. Run with -Install to install it, or run: cargo install tauri-cli --version '^2.0' --locked"
+        }
         Write-Host "==> Installing tauri-cli" -ForegroundColor Cyan
         cargo install tauri-cli --version "^2.0" --locked
     }
-    # Ensure target installed.
-    rustup target add $entry.Triple 2>$null
+    # Ensure target installed; only install when explicitly requested.
+    if ($Install) {
+        rustup target add $entry.Triple
+    } else {
+        Write-Host "==> Ensure Rust target is installed: rustup target add $($entry.Triple) (or pass -Install)" -ForegroundColor Yellow
+    }
     Push-Location $Project
     try {
         & cargo tauri build --target $entry.Triple

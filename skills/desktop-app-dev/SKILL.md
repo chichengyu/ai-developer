@@ -5,202 +5,112 @@ description: "Consultative Codex skill for shipping native cross-platform deskto
 
 # Desktop App Dev
 
-A consultative Codex skill for shipping native cross-platform desktop GUI applications.
-The agent that uses this skill behaves like a desktop-app architect: it
-**first** digs past the literal request to surface hidden requirements,
-**then** picks the right framework, **then** decomposes the work into
-verifiable tasks, **then** builds, **then** verifies, **then** hands off.
+A consultative Codex skill for shipping native cross-platform desktop GUI applications. It first digs past the literal request to surface hidden requirements, then selects a framework, decomposes the work, builds, verifies, and hands off.
 
 ## The 8-step workflow (apply in order)
 
-| # | Step | Output |
-|---|---|---|
-| 0 | **Deep requirements analysis** | requirements.md |
-| 1 | **Classify the app** | category (A/B/C/D) |
-| 2 | **Pick the framework** | framework decision + rationale. Use `python scripts\select_framework.py brief.json` for an evidence-backed ranking across all 23 canonical frameworks |
-| 3 | **Decompose into atomic tasks** | tasks.md (DAG with acceptance criteria) |
-| 4 | **Apply core patterns** | project scaffold + core code |
-| 5 | **Package** | installer / portable EXE |
-| 6 | **Verify** | verification report |
-| 7 | **Hand off** | user-facing README + comments |
+| # | Step | Output | Key action |
+|---|---|---|---|
+| 0 | **Deep requirements analysis** | requirements.md | Six-bucket interview; record showstopper, update method, idle behavior; copy `templates/requirements_checklist.md` |
+| 1 | **Classify the app** | category A/B/C/D | Bind to the hardest constraint |
+| 2 | **Pick the framework** | framework decision + rationale | `python scripts/select_framework.py brief.json`; document rejection reasons for #2/#3 |
+| 3 | **Decompose into atomic tasks** | tasks.md DAG | One card per task via `templates/task_card.md`; tag the showstopper |
+| 4 | **Apply core patterns** | scaffold + core code | Threading, SendInput, window enum, resources, UI-01..UI-18, media pipeline |
+| 5 | **Package** | installer / portable EXE | Source backup first, then build, sign, auto-update |
+| 6 | **Verify** | verification report | Run the Step 6 checklist |
+| 7 | **Hand off** | user-facing README + comments | Install/build/log/bug/limitations |
 
-
+Do NOT skip Step 0 even if the user says "just build X fast". Hidden requirements are the #1 cause of projects that look done but aren't. Do NOT skip Step 3 even for small apps -- "build the GUI" is never one task.
 
 ## Scope and limits
 
 ### In scope
 
-Native cross-platform desktop GUI applications. Each operating system
-has its own build, packaging, signing, and input conventions; the
-skill ships templates for all three.
+Native cross-platform desktop GUI applications. OS conventions:
 
-| OS      | Versions                  | Default UI stack          | Input API                  | Window enum API                  | Code sign / notarize    |
-|---------|---------------------------|---------------------------|----------------------------|----------------------------------|-------------------------|
-| Windows | 10 1809+, 11              | WPF / WinUI 3 / Avalonia  | `SendInput` (user32)       | `EnumWindows` (user32)           | `signtool` + Authenticode |
-| macOS   | 11+ (Big Sur), Apple Silicon preferred | SwiftUI / AppKit / Catalyst | `CGEventPost` (Quartz)      | `CGWindowListCopyWindowInfo` (Quartz) | `codesign` + `notarytool` |
-| Linux   | glibc 2.31+ (Ubuntu 20.04+, RHEL 9+, Debian 11+, Fedora 36+) | GTK 4 / Qt 6 / Tauri / Electron | `XTestFakeInputEvent` (X11) or uinput (Wayland) | `XQueryTree` + `_NET_CLIENT_LIST` (X11) | per-distro (deb / rpm / AppImage signing) |
+| OS | Versions | Input API | Window enum API | Signing |
+|---|---|---|---|---|
+| Windows | 10 1809+, 11 | `SendInput` (user32) | `EnumWindows` (user32) | `signtool` + Authenticode |
+| macOS | 11+ (Big Sur), Apple Silicon preferred | `CGEventPost` (Quartz) | `CGWindowListCopyWindowInfo` (Quartz) | `codesign` + `notarytool` |
+| Linux | glibc 2.31+ (Ubuntu 20.04+, RHEL 9+, Debian 11+, Fedora 36+) | `XTestFakeInputEvent` (X11) or uinput (Wayland) | `XQueryTree` + `_NET_CLIENT_LIST` (X11) | per-distro |
 
-Per-architecture coverage across all three OSes:
-
-- **win-x64**      (default; Intel / AMD 64-bit -- the common case)
-- **win-arm64**    (Snapdragon X Elite, Surface Pro X, Windows Dev Kit 2023)
-- **win-x86**      (legacy 32-bit Windows -- old hardware)
-- **macos-x64**    (Intel Macs -- last supported by macOS 12; legacy)
-- **macos-arm64**  (Apple Silicon M1/M2/M3/M4 -- the common case today)
-- **linux-x64**    (Intel / AMD servers and desktops)
-- **linux-arm64**  (Raspberry Pi 4/5, AWS Graviton, Snapdragon X Linux, Asahi Linux)
-
-Per-architecture notes:
-
-- All `build_*.ps1` scripts accept `-Arch` with platform-appropriate values.
-- PyInstaller / dotnet publish / cargo all default to host architecture;
-  cross-compile only via the documented per-tool recipe.
-- `SendInput` / `EnumWindows` (Win) work identically across all Windows
-  architectures (no Win32 ABI differences for these APIs).
-- `CGEventPost` / `CGWindowListCopyWindowInfo` (macOS) work on both
-  Intel and Apple Silicon -- they are part of the OS, not the ABI.
-- `XTestFakeInputEvent` (X11) is arch-neutral. Wayland requires uinput
-  which is kernel-bound and arch-neutral.
-- NativeAOT (`-p:PublishAot=true`) currently only targets x64 on Windows.
+Architecture coverage: win-x64 / win-arm64 / win-x86, macos-x64 / macos-arm64, linux-x64 / linux-arm64. All 14 `scripts/build_*.ps1` helpers accept `-Arch`; PyInstaller / dotnet publish / cargo default to host architecture; NativeAOT is win-x64 only. Full architecture matrix: `references/distribution_playbook.md`. Structural test: `powershell tests/test_arch_awareness.ps1`.
 
 ### Out of scope
 
-Explicitly **not** covered. Do not pretend these are part of this skill.
+- iOS / iPadOS / watchOS / visionOS and Android apps -> `mobile-app-dev`
+- Web apps / SPAs, browser extensions
+- CLI tools / libraries, server / headless
+- Windows services / drivers
+- Browser / kiosk / locked-down endpoints
 
-| Domain                  | Why out of scope                                  | Use instead                                |
-|-------------------------|---------------------------------------------------|--------------------------------------------|
-| iOS / iPadOS / watchOS / visionOS apps | Different ABI (ARM64 only), no Win32 / Quartz / X11, App Store + TestFlight | the `mobile-app-dev-ios` skill |
-| Android apps            | APK + Play Store, Java/Kotlin toolchain            | the `mobile-app-dev-ios` skill (Android half) |
-| Web apps / SPAs         | Browser sandbox, no native window                  | a web framework skill                       |
-| Browser extensions      | Different manifest, MV3 specifics                  | a web-extension skill                       |
-| CLI tools / libraries   | No GUI main loop; hardware input not relevant      | a CLI-design skill                          |
-| Server / headless       | No window, different observability                 | a backend skill                             |
-| Windows services / drivers | No UI; kernel vs user mode                     | a separate sysdev skill                     |
-| Browser / kiosk / locked-down endpoints | Different OS image lifecycle        | an embedded / MDM skill                     |
-
-### Architecture support matrix
-
-| Framework / script            | Win x64 | Win arm64 | Win x86 | macOS x64 | macOS arm64 | Linux x64 | Linux arm64 | Notes |
-|-------------------------------|:-------:|:---------:|:-------:|:---------:|:-----------:|:---------:|:-----------:|-------|
-| `build_dotnet.ps1`            |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | per-OS RID; default win-x64 |
-| `build_dotnet_nativeaot.ps1`  |   Y     |    -      |    -    |     -     |     -       |     -     |     -       | NativeAOT is win-x64 only |
-| `build_electron.ps1`          |   Y     |    Y      |    Y*   |     Y     |     Y       |     Y     |     Y       | `ia32` instead of `x86`     |
-| `build_qt.ps1`                |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | needs matching Qt toolchain |
-| `build_python.ps1`            |   Y     |    Y*     |    Y*   |     Y     |     Y*      |     Y     |     Y*      | PyInstaller is host-bound   |
-| `build_tauri.ps1`             |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | uses Rust target triples    |
-| `build_go_wails.ps1`          |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | `windows/{amd64,arm64,386}` |
-| `build_go_fyne.ps1`           |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | sets `GOOS`+`GOARCH`       |
-| `build_go_gio.ps1`            |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | sets `GOOS=...` + `GOARCH`  |
-| `build_kotlin_compose.ps1`    |   Y     |    Y*     |    Y*   |     Y     |     Y*      |     Y     |     Y*      | Compose Desktop arch        |
-| `build_swift.ps1`             |   Y     |    Y      |    -    |     Y     |     Y       |     Y*    |     Y*      | `--triple` per triple       |
-| `build_neutralino.ps1`        |   Y     |    Y      |    Y    |     Y     |     Y       |     Y     |     Y       | arch follows WebView runtime|
-| `build_macos.ps1`             |   -     |    -      |    -    |     Y     |     Y       |     -     |     -       | macOS-only build helper     |
-| `build_linux.ps1`             |   -     |    -      |    -    |     -     |     -       |     Y     |     Y       | Linux-only build helper     |
-| `build_dmg.sh`                |   -     |    -      |    -    |     Y     |     Y       |     -     |     -       | DMG packaging               |
-| `build_appimage.sh`           |   -     |    -      |    -    |     -     |     -       |     Y     |     Y       | AppImage packaging          |
-| `build_deb.sh`                |   -     |    -      |    -    |     -     |     -       |     Y     |     Y       | .deb packaging              |
-
-`*` = supported by the toolchain but not yet verified at run time in this skill.
-
-Run the structural test: `powershell tests/test_arch_awareness.ps1`
-
----
-
----
-
-If a request falls under any "Out of scope" row, **stop and tell the user**
-rather than silently producing a Windows desktop answer.
-
----
+If a request falls under any "Out of scope" row, **stop and tell the user** rather than silently producing a Windows desktop answer.
 
 ## When NOT to use this skill
 
-This skill is for shipping a native cross-platform desktop GUI
-application. Do not
-reach for it if any of the following is true:
+- The deliverable is a CLI tool, library, or server.
+- The deliverable is a web app, SPA, or browser extension.
+- The deliverable is a mobile app.
+- The user only wants a single-purpose script under ~200 lines.
+- The user is researching or comparing frameworks but is not ready to commit: send `references/framework_matrix.md` as a standalone doc.
+- The target is a console-mode subsystem, Windows service, or driver.
+- The user is locked into one framework by team / company policy: skip Step 2 and apply Steps 0, 3, 4, 5, 6, 7 directly.
 
-- **The deliverable is a CLI tool, library, or server.** Use the
-  CLI-building or API-design skill instead. SendInput / EnumWindows are
-  not relevant.
-- **The deliverable is a web app or SPA.** This skill is desktop-only.
-  Reach for the web-app skill.
-- **The deliverable is a mobile app.** Desktop-specific patterns
-  (SendInput, EnumWindows, COM, MSIX) do not apply. Use the mobile skill.
-- **The user only wants a single-purpose script under ~200 lines.**
-  The 8-step workflow is overkill. Skip the skill and write the script.
-- **The user is researching or comparing frameworks but is not ready
-  to commit.** Send them `references/framework_matrix.md` as a
-  standalone doc, do not start the workflow.
-- **The target is a console-mode subsystem, Windows service, or driver.**
-  Those need a different skill; this one assumes a GUI main window.
-- **The user is locked into one framework by team / company policy.**
-  Skip Step 2 and apply Steps 0, 3, 4, 5, 6, 7 directly.
+If the request is ambiguous, ask one clarifying question (the showstopper) before starting.
 
-If the request is ambiguous, ask one clarifying question (the
-showstopper) before starting. Do not pretend the request is a desktop
-app when it is not.
+## 界面硬性要求（UI hard requirements）
 
----
+Every desktop GUI built with this skill inherits the mandatory UI-01..UI-18 checklist below. Record each item in requirements.md during Step 0, implement it in the UI tasks, and verify it in Step 6. An item may be skipped only when the user explicitly waives it in requirements.md. Full rules, the Codex-like default palette, semantic colors, theme library URLs, and the acceptance checklist live in `references/ui_hard_requirements.md`.
 
-Do NOT skip Step 0 even if the user says "just build X fast". Hidden
-requirements are the #1 cause of projects that look done but aren't.
-Do NOT skip Step 3 even for small apps -- "build the GUI" is never one
-task; it's at least scaffold, core data model, threading, UI, errors,
-settings, packaging.
-
----
+| ID | 硬性要求 | 验收标准 |
+|---|---|---|
+| UI-01 | 全局配色统一；未指定主题时模仿 Codex 界面 | 左右导航、表格、控件共用同一套颜色令牌；按钮/图标与背景对比可见 |
+| UI-02 | 全局控件样式统一 | 右键菜单、下拉框、输入框占位、滚动条、按钮、弹窗、分页共用同一套样式 |
+| UI-03 | 文字与背景形成鲜明对比 | 普通文字 >= 4.5:1，大字号/图标 >= 3:1；禁用同色不可见按钮 |
+| UI-04 | 布局上下左右对齐一致 | 行高、间距、基线一致；宽度/长度不足时使用滚动条或换行 |
+| UI-05 | 右侧页面只显示一个表格 | 需要多个表格时另开页面/视图 |
+| UI-06 | 不重复页面标题 | 左侧导航已显示菜单名时，右侧表格不再重复显示该名称 |
+| UI-07 | 管理列表底部显示分页 | 总数、每页条数、页码、上/下一页，样式与全局一致 |
+| UI-08 | 截断文本显示完整提示 | 省略号文本悬停时弹出完整内容框 |
+| UI-09 | 每行支持设置自动刷新间隔 | 行操作栏与右键菜单都有“设置自动刷新时间间隔” |
+| UI-10 | 主题中心与主题下载地址 | 内置主题 >= 3；显示主题库地址；“刷新”拉取在线主题；下载完成后按钮变为“应用” |
+| UI-11 | 所有选项去重 | 菜单、下拉、主题列表等不出现重复选项 |
+| UI-12 | 用户配置持久化 | 保存后的主题、布局、分页、刷新间隔等下次启动保持一致 |
+| UI-13 | 左侧导航提供日志中心 | 成功/失败日志可列表查看；失败日志含原因与解决方法 |
+| UI-14 | 语义色全局统一 | 危险红、警告橙、成功绿、信息蓝 |
+| UI-15 | 表单编辑提供示例 | 搜索、分页、编辑表单等控件有默认值和示例文本 |
+| UI-16 | 滚动条明显且图标显示 | 左侧菜单与右侧内容溢出时滚动条颜色明显；菜单图标不丢失 |
+| UI-17 | 表格提示与搜索栏分行 | 提示信息不挤在搜索栏同一行；过长换行，上下溢出加滚动条 |
+| UI-18 | 重型桌面端界面，禁止 Web 化 | 原生窗口/菜单/工具栏/状态栏/数据表格/右键菜单/键盘操作；不使用网页式大卡片、英雄区、浮动圆角卡片、无尽滚动等布局 |
 
 ## Step 0 -- Deep requirements analysis
 
-Copy `templates/requirements_checklist.md`, fill it in. Do not paraphrase
-the user back to themselves; dig deeper.
+Copy `templates/requirements_checklist.md` and fill it in. Do not paraphrase the user back to themselves; dig deeper. Record each UI-01..UI-18 item or an explicit waiver in requirements.md.
 
 **Six buckets to interrogate:**
 
-1. **Functional (literal)** -- what they explicitly asked for.
-2. **Functional (implicit)** -- what they need but did not say:
-   settings persistence, error handling, logging, crash reporting,
-   localization, accessibility (screen reader, high contrast,
-   keyboard-only), undo/redo, auto-save.
-3. **Non-functional** -- cold start budget, memory ceiling, CPU at idle
-   vs peak, network assumptions (online / offline / both), reliability
-   targets, security classification of any data handled.
-4. **Distribution** -- portable EXE vs MSI vs MSIX vs Store; code-signing
-   cert available? auto-update yes/no and channel; per-user vs
-   per-machine install; elevation needed?
-5. **Integration** -- local (file system, registry, services, drivers,
-   COM, hardware: USB/serial/Bluetooth), remote (HTTP, gRPC, sockets,
-   message queue), databases, auth, other apps (IPC, WebView2 host).
-6. **Failure modes to design for** -- target process missing, network
-   down, disk full, permission denied, concurrent modification, corrupt
-   config file, recipient running the wrong runtime version.
+1. Functional (literal) -- what they explicitly asked for.
+2. Functional (implicit) -- settings persistence, error handling, logging, crash reporting, localization, accessibility, undo/redo, auto-save.
+3. Non-functional -- cold start budget, memory ceiling, CPU at idle vs peak, network assumptions, reliability, security classification.
+4. Distribution -- portable EXE vs MSI vs MSIX vs Store, code-signing cert, auto-update channel, per-user vs per-machine, elevation.
+5. Integration -- local files/registry/services/COM/hardware; remote HTTP/gRPC/sockets/queues; databases/auth/IPC.
+6. Failure modes -- missing process, network down, disk full, permission denied, concurrent modification, corrupt config, wrong runtime.
 
-**Three questions to always ask the user** (and accept that the answer
-"don't care" is a valid answer that should be recorded):
+**Three questions to always ask** (record even "don't care"):
 
-- "What is the smallest thing this app must NOT do wrong?" (the
-  showstopper; everything else is negotiable)
-- "How will recipients get updates?" (forces an answer about distribution)
-- "What does this app look like when nothing is happening?" (idle
-  behavior -- background work, tray icon, scheduled tasks)
+- What is the smallest thing this app must NOT do wrong? (showstopper)
+- How will recipients get updates? (forces a distribution answer)
+- What does this app look like when nothing is happening? (idle behavior)
 
-**Common omissions to flag explicitly** when the user did not mention
-them: logging destination, settings migration between versions, AV
-false-positive handling, Windows version skew (10 vs 11), DPI scaling
-(multi-monitor with mixed DPI), backup of user data, opt-in telemetry.
+**Common omissions to flag:** logging destination, settings migration, AV false-positive handling, Windows version skew, mixed-DPI scaling, user-data backup, opt-in telemetry.
 
-If any of these cannot be resolved before coding starts, they become
-**explicit assumptions** recorded in requirements.md, not surprises later.
+If any of these cannot be resolved before coding starts, they become explicit assumptions recorded in requirements.md.
 
-Deep dive in `references/task_decomposition.md` -- section "Requirements
-deep dive".
-
----
+Deep dive: `references/task_decomposition.md`.
 
 ## Step 1 -- Classify the app
 
-Pick the one category whose hardest constraint would force a different
-framework. Mixed requests are normal; resolve by the binding constraint.
+Pick the one category whose hardest constraint would force a different framework. Mixed requests are normal; resolve by the binding constraint.
 
 | Category | Typical signals | Hardest constraint |
 |---|---|---|
@@ -209,84 +119,15 @@ framework. Mixed requests are normal; resolve by the binding constraint.
 | **C. System / DevOps** | "registry", "service", "driver", "P/Invoke", "COM", "ETW" | Deep OS access; Windows-only usually acceptable |
 | **D. Multimedia / creative** | "GPU", "render", "OpenGL", "DirectX", "camera", "audio" | GPU access, frame budget, low-latency I/O |
 
-If the user mentions multiple categories, list each constraint and pick
-the framework that satisfies all of them. If none of the popular
-frameworks satisfies all, recommend splitting the project (e.g. a Tauri
-UI talking to a Rust sidecar that does the heavy lifting).
-
----
+If no popular framework satisfies all constraints, recommend splitting the project (e.g. a Tauri UI talking to a Rust sidecar).
 
 ## Step 2 -- Pick the framework
 
-Use the matrix below. Pick the framework that scores "best" on the user's
-binding constraint, not the framework you know best. **Always document the
-rejection reasons for the next two candidates** -- the user will ask.
+Use `python scripts/select_framework.py brief.json` (schema: `templates/requirements_brief.md`) for an evidence-backed ranking, or use `templates/gui_framework_decision_tree.md` / `references/framework_matrix.md` when a human decision is already close. **Always document rejection reasons for the next two candidates.**
 
-### Quick decision tree
-
-```
-Need WPF/WinUI look on Windows-only?           -> C# / .NET (WPF or WinUI 3)
-Need cross-platform desktop, modern UI?        -> Tauri (Rust+Web) or .NET MAUI
-Need cross-platform + JS team only?            -> Electron or Tauri
-Need max performance + small EXE?              -> C++/Qt or Rust+Slint/egui
-Need fastest prototype, Python team?           -> Python (tkinter or PySide6)
-Need single portable EXE?                      -> .NET NativeAOT, Tauri, Rust+Slint, PyInstaller
-Need legacy Win32/MFC/ActiveX interop?         -> C#/.NET + P/Invoke, or C++/Qt
-Need GPU rendering (3D, shaders)?              -> C++/Qt Quick, Rust+wgpu, or C# + Vortice.Windows
-Need cross-platform + Go team?                 -> Wails (Go+Web) or Fyne
-Need Windows-only native Go UI?                -> walk (Win32 bindings for Go)
-Need cross-platform + Kotlin team?              -> Compose Multiplatform (Desktop)
-Need JVM desktop with declarative UI?            -> TornadoFX (Kotlin/JavaFX DSL)
-Need macOS-first, Swift-only codebase?           -> SwiftUI + AppKit
-Want Electron-like TypeScript, tiny EXE?        -> Neutralino.js (no Chromium bundled)
-```
-
-### Framework matrix
-
-Columns are the dimensions users actually ask about. A "1" is best in
-class, a "5" is worst.
-
-| Framework | Cold start | EXE size | Native look | Hardware access | Distribution ease | Learning curve | Cross-platform |
-|---|---|---|---|---|---|---|---|
-| C# / WPF (.NET 8+) | 2 | 3 | 2 | 2 | 1 | 2 | No |
-| C# / WinUI 3 | 2 | 3 | 1 | 2 | 2 | 3 | No |
-| .NET MAUI | 3 | 3 | 3 | 2 | 2 | 3 | Yes |
-| Avalonia | 2 | 2 | 2 | 2 | 2 | 2 | Yes |
-| C++ / Qt 6 | 1 | 2 | 2 | 1 | 2 | 3 | Yes |
-| C++ / Win32 / MFC | 1 | 1 | 2 | 1 | 4 | 5 | No |
-| Tauri (Rust+Web) | 1 | 1 | 3 | 1 | 1 | 3 | Yes |
-| Electron | 4 | 5 | 4 | 3 | 2 | 2 | Yes |
-| Rust + Slint | 1 | 1 | 3 | 1 | 2 | 3 | Yes |
-| Rust + egui | 1 | 1 | 4 | 1 | 2 | 2 | Yes |
-| Python / tkinter | 2 | 4 | 4 | 2 | 2 | 1 | Yes |
-| Python / PySide6 | 3 | 5 | 2 | 2 | 2 | 3 | Yes |
-| Flutter Desktop | 2 | 3 | 3 | 3 | 2 | 3 | Yes |
-| Java / JavaFX | 3 | 3 | 4 | 2 | 3 | 2 | Yes |
-| Wails (Go+Web) | 1 | 2 | 3 | 1 | 1 | 2 | Yes |
-| Fyne (Go) | 2 | 3 | 3 | 2 | 2 | 2 | Yes |
-| Gio (Go, GPU) | 1 | 1 | 4 | 1 | 2 | 3 | Yes |
-| walk (Go, Win32) | 1 | 1 | 2 | 1 | 3 | 4 | No |
-| Compose Multiplatform (Kotlin) | 2 | 4 | 3 | 2 | 2 | 2 | Yes |
-| TornadoFX (Kotlin/JavaFX) | 3 | 4 | 4 | 2 | 3 | 3 | Yes |
-| Swift / SwiftUI (Apple) | 1 | 2 | 1 | 1 | 2 | 3 | Yes |
-| Neutralino.js (TS, WebView) | 2 | 1 | 4 | 3 | 1 | 1 | Yes |
-
-### Distribution-first override
-
-If the user specifies a hard distribution constraint, narrow the matrix first:
-
-| Distribution | Viable frameworks |
-|---|---|
-| **Single-file portable EXE** (< 50 MB, no install) | Tauri, Rust+Slint, .NET 8 self-contained + R2R, NativeAOT, C++/Qt static, PyInstaller, Fyne, Gio, walk, Neutralino.js (TS+WebView2), Kotlin/Native (limited desktop UI) |
-| **MSI installer** | C#/.NET (WiX), C++/Qt (windeployqt + WiX), Tauri, Electron (electron-builder MSI) |
-| **MSIX** | C#/WinUI 3, C#/WPF (WAP), Tauri (MSIX target) |
-| **Microsoft Store** | C#/WinUI 3, C#/WPF (packaged), Electron, Tauri |
-| **Auto-update channel** | Velopack (any), Squirrel (Electron, C#), WinSparkle (C++/Qt) |
-| **Cross-platform + single codebase** | Tauri, .NET MAUI, Avalonia, Electron, Flutter Desktop, Qt, Wails, Fyne, Gio, Compose Multiplatform, Neutralino.js |
+The selector covers all 24 canonical frameworks, including C# / WPF, C# / WinForms (.NET 8+), C# / WinUI 3, .NET MAUI, Avalonia, C++ / Qt 6, Tauri, Electron, Rust + Slint, Rust + egui, Python / tkinter, Python / PySide6, Python / GTK (PyGObject), Flutter Desktop, JavaFX, Wails, Fyne, Gio, walk, Compose Multiplatform, TornadoFX, SwiftUI, and Neutralino.js. Deep pros/cons: `references/framework_matrix.md`; scoring algorithm: `references/framework_selection_engine.md`; distribution-first override and architecture matrix: `references/distribution_playbook.md`.
 
 ### Step 2.5 -- Bootstrap the toolchain (optional)
-
-After the framework is selected, install the matching SDK / toolchain:
 
 ```powershell
 powershell -File scripts/bootstrap_environment.ps1 -Brief brief.json -DryRun
@@ -294,347 +135,167 @@ powershell -File scripts/bootstrap_environment.ps1 -Brief brief.json -Install
 powershell -File scripts/bootstrap_environment.ps1 -Framework python -Install
 ```
 
-`-Brief` auto-selects the framework with `scripts/select_framework.py`;
-`-Framework` accepts a framework or language key directly. The
-framework-to-toolchain mapping lives in `scripts/toolchain_map.json`.
-Install actions use winget and pip, so they require network access and
-user approval.
-
----
+`-Brief` auto-selects the framework with `scripts/select_framework.py`; `-Framework` accepts a framework or language key directly. The mapping lives in `scripts/toolchain_map.json`. Install actions use winget and pip, so they require network access and user approval. Build helpers follow the same rule: missing CLIs are only installed when you pass `-Install`; otherwise the script fails with the exact install command.
 
 ## Step 3 -- Decompose into atomic tasks
 
 "Build me X" is never one task. Decompose until each task is:
 - Completable in one focused work session (<= a few hours).
 - Independently verifiable against an acceptance criterion.
-- Has zero or few dependencies on other tasks.
+- Zero or few dependencies on other tasks.
 
-Use the task card at `templates/task_card.md` -- one card per task.
+Use `templates/task_card.md` -- one card per task.
 
-**Standard decomposition order** (left-to-right; later tasks depend on earlier):
+Standard order: T1 scaffold, T2 data model/persistence, T3 core services, T4 UI shell (UI-01..UI-18 + DPI), T5 feature tasks, T6 polish, T7 integration (auto-update/telemetry/crash), T8 packaging (build/sign/hash), T9 documentation.
 
-```
-T1  Project scaffold (repo, build, CI, signing cert procurement)
-T2  Core data model / persistence (settings, file formats, DB schema)
-T3  Core services (threading, IPC, file watcher, DB access, HTTP client)
-T4  UI shell (main window, navigation, theming, DPI handling)
-T5  Feature tasks (one per user-visible feature, each with own acceptance test)
-T6  Polish (logging, error UI, settings migration, accessibility)
-T7  Integration (auto-update channel, telemetry, crash reporter)
-T8  Packaging (EXE/installer build, code-sign, hash pinning)
-T9  Documentation (README, build instructions, troubleshooting)
-```
+Variations: game automation inserts a T3.5 anti-cheat research spike; system tools start with a Win32 capability survey; multimedia adds GPU device enumeration and shader/asset pipeline.
 
-**Variations:**
-- Game automation: insert T3.5 "anti-cheat research spike" before T5
-  features; if anti-cheat blocks standard approaches, T5 changes shape.
-- System tool: T3 starts with "Win32 capability survey" because some
-  admin APIs require elevation.
-- Multimedia: T4 includes "GPU device enumeration" + "shader/asset
-  pipeline".
+Each card: title, description, category, concrete acceptance criteria, dependencies, S/M/L effort, risk + mitigation, verification method. Mark parallel tasks `[P]`; tag the single failure that kills the project `[showstopper]` and verify it early.
 
-**For each task card fill in:**
-- Title, description, category (scaffold / model / service / UI / polish / pkg)
-- Acceptance criteria -- concrete, testable ("Ctrl+S saves to %APPDATA%\app\config.json",
-  not "settings work").
-- Dependencies -- list of task IDs that must complete first.
-- Estimated effort -- S/M/L.
-- Risk + mitigation.
-- Verification method -- unit test, manual smoke, automated UI test.
-
-**Identify parallel vs sequential work.** Tasks with no inter-dependency
-can be done in parallel; mark them `[P]` in the task list.
-
-**Identify the showstopper.** Tag the single task whose failure kills the
-project as `[showstopper]` and verify it early.
-
-Deep dive + worked examples in `references/task_decomposition.md`.
-
----
+Deep dive + worked examples: `references/task_decomposition.md`.
 
 ## Step 4 -- Apply core patterns
 
 ### 4.1 UI responsiveness (the universal rule)
 
-Every desktop framework runs UI callbacks on a single UI thread. Any
-blocking call (sleep, sync socket, subprocess wait, large file read,
-COM call, DB query) freezes the window. Wrap every blocking call in a
-background worker and post results back to the UI thread using the
-framework's safe bridge.
+Every desktop framework runs UI callbacks on a single UI thread. Any blocking call (sleep, sync socket, subprocess wait, large file read, COM, DB query) freezes the window. Wrap blocking work in a background worker and post results back through the framework's safe bridge. NEVER mutate UI from the worker.
 
-| Framework | Background primitive | UI bridge |
-|---|---|---|
-| C# / WPF, WinUI 3 | `Task.Run(...)` | `await` + `DispatcherQueue.TryEnqueue` / `Dispatcher.InvokeAsync` |
-| C# / WinForms | `Task.Run` | `this.Invoke(...)` |
-| Avalonia | `Task.Run` | `Dispatcher.UIThread.Post(...)` |
-| C++ / Qt | `QThread`, `QtConcurrent::run` | `QMetaObject::invokeMethod(target, ..., Qt::QueuedConnection)` |
-| Tauri (Rust) | `tokio::spawn` / `tauri::async_runtime::spawn` | `window.emit("event", payload)` |
-| Electron | `worker_threads` or child process | `mainWindow.webContents.send("event", payload)` |
-| Python / tkinter | `threading.Thread(daemon=True)` | `root.after(0, callback)` |
-| Python / PySide6 | `QThread` or `QThreadPool` | Signal/slot (auto-queued) |
-| Flutter Desktop | `Isolate.spawn` / `compute` | Stream / Completer |
-| Go (Fyne) | `go func()` | `fyne.Do(func(){...})` or channel |
-| Go (Wails) | `go func()` | `runtime.EventsEmit(ctx, "event", payload)` |
-| Go (walk) | `go func()` | `walk.Window.RunSafe(func(){...})` |
-| Kotlin (Compose Desktop) | `launch { ... }` (coroutine) | `withContext(Dispatchers.Main) { ... }` |
-| Kotlin (TornadoFX) | `runAsync { ... }` | UI thread auto (JavaFX Application Thread) |
-| Swift (SwiftUI) | `Task { ... }` | `@MainActor` or `await MainActor.run { ... }` |
-| Java / JavaFX | `Task` + `Service` | `Platform.runLater(...)` |
-
-NEVER mutate UI from the worker. The bridge is the ONLY safe path back.
-
-Templates: `scripts/threading_wpf.cs`, `scripts/threading_winui.cs`,
-`scripts/threading_tkinter.py`, `scripts/threading_pyside6.py`,
-`scripts/threading_tauri.rs`, `scripts/threading_glib.py`,
-`scripts/threading_dispatch.swift`, plus the `sendinput_*` and matching
-`window_enum_*` templates for each language.
+Templates: `scripts/threading_wpf.cs`, `scripts/threading_winui.cs`, `scripts/threading_tkinter.py`, `scripts/threading_pyside6.py`, `scripts/threading_tauri.rs`, `scripts/threading_glib.py`, `scripts/threading_dispatch.swift`. Full background/UI-bridge table: `references/framework_matrix.md`.
 
 ### 4.2 Hardware-level input (SendInput, anti-cheat safe)
 
-For input that must reach a specific window even when it is not focused --
-including games with anti-cheat -- use `user32.SendInput` (Win),
-`CGEventPost` (mac), `XTestFakeInputEvent` (X11), `uinput` (Linux).
-Do NOT use `PostMessage`, `SendMessage`, `keybd_event` (deprecated),
-memory write, or auto-hotkey-style scripts. These are detected or
-ignored by modern anti-cheat and most EDR products.
+For input that must reach a specific window even when unfocused -- including games with anti-cheat -- use `user32.SendInput` (Win), `CGEventPost` (mac), `XTestFakeInputEvent` (X11), or `uinput` (Linux Wayland). Do NOT use `PostMessage`, `SendMessage`, `keybd_event`, memory write, or AHK-style scripts.
 
-Mandatory order on Windows:
+Mandatory Windows order:
 1. Find the target HWND (4.3).
-2. Restore + foreground: `ShowWindow(hwnd, SW_RESTORE)` then
-   `SetForegroundWindow(hwnd)`.
-3. Build an `INPUT` struct with `type=INPUT_KEYBOARD`, `ki.wVk` =
-   virtual key code, `ki.dwFlags = 0` for press or `KEYEVENTF_KEYUP`
-   for release.
-4. Call `SendInput(2, [press, release], sizeof(INPUT))` with 30-80 ms
-   between halves.
-5. Add 50-150 ms jitter between key events when targeting a game. All
-   templates randomize this range by default; pass an explicit positive
-   `jitterMs` / `jitter_range_ms` value to force a fixed delay.
+2. Restore + foreground: `ShowWindow(hwnd, SW_RESTORE)` then `SetForegroundWindow(hwnd)`.
+3. Build an `INPUT` struct; press with `dwFlags = 0`, release with `KEYEVENTF_KEYUP`.
+4. Call `SendInput` for press, wait 30-80 ms, then send release as a separate call.
+5. Add 50-150 ms jitter between key events when targeting a game.
 
-Templates in **10 languages**:
-- `scripts/sendinput_python.py` (ctypes)
-- `scripts/sendinput_dotnet.cs` (P/Invoke)
-- `scripts/sendinput_win32.c` (Win32)
-- `scripts/sendinput_rust.rs` (windows crate)
-- `scripts/sendinput_go.go` (golang.org/x/sys/windows)
-- `scripts/SendInput.java` (JNA)
-- `scripts/sendinput_dart.dart` (dart:ffi)
-- `scripts/sendinput_node.ts` (koffi)
-- `scripts/sendinput_swift.swift` (WinSDK)
-- `scripts/sendinput_kotlin.kt` (Win32 FFI)
-
-OS-specific analogues: `scripts/sendinput_macos.py` (CGEventPost) and
-`scripts/sendinput_linux.py` (XTestFakeKeyEvent).
-
-The Python Windows template additionally ships `move_mouse`, `click`, and
-`scroll`; the other language templates are keyboard-only.
-
-The canonical key table lives in `scripts/vk_table.json`;
-`scripts/check_vk_tables.py` verifies that the Python reference template
-matches it exactly.
+Templates: `scripts/sendinput_*` (10 Windows languages + Java) plus `scripts/sendinput_macos.py` and `scripts/sendinput_linux.py`. The Python Windows template also ships `move_mouse`, `click`, and `scroll`. Canonical key table: `scripts/vk_table.json`; verify with `scripts/check_vk_tables.py`.
 
 ### 4.3 Window enumeration (timeout + cache, always)
 
 Default flow on Windows:
-1. Try `user32.FindWindowW(class_name, window_title)` -- O(1), no
-   allocation.
+1. Try `user32.FindWindowW(class_name, window_title)` -- O(1).
 2. If title is partial or class is unknown, fall back to `EnumWindows`.
-3. **Always run `EnumWindows` inside a thread guarded by a 3-second
-   timeout.** An owner-drawn window can block `EnumWindows`
-   indefinitely and spike the UI lag to several seconds.
-4. Cache results by `(class_name or None, title_substring)` for the
-   current session. Invalidate on a "Refresh" click.
+3. Always run `EnumWindows` inside a thread guarded by a 3-second timeout.
+4. Cache results by `(class_name or None, title_substring)`; invalidate on refresh.
 
-Templates in **9 languages**:
-- `scripts/window_enum_python.py` (ctypes)
-- `scripts/window_enum_dotnet.cs` (P/Invoke)
-- `scripts/window_enum_rust.rs` (windows crate)
-- `scripts/window_enum_go.go` (golang.org/x/sys/windows)
-- `scripts/WindowEnum.java` (JNA)
-- `scripts/window_enum_dart.dart` (package:win32)
-- `scripts/window_enum_node.ts` (koffi; EnumWindows needs a C++ shim -- see file comments)
-- `scripts/window_enum_swift.swift` (WinSDK)
-- `scripts/window_enum_kotlin.kt` (Win32 FFI)
+Templates: `scripts/window_enum_*` (9 Windows languages + Java, plus the Node C++ shim) and `scripts/window_enum_macos.py` / `scripts/window_enum_linux.py`.
 
-OS-specific analogues: `scripts/window_enum_macos.py`
-(CGWindowListCopyWindowInfo) and `scripts/window_enum_linux.py`
-(X11 XQueryTree + EWMH).
+### 4.4 Resource embedding
 
-### 4.4 Resource embedding (per framework)
+Per-framework asset embedding table: `references/framework_matrix.md`.
 
-| Framework | How to embed and locate assets at runtime |
-|---|---|
-| C# / .NET | Mark files as `Resource` or `Content` in csproj; access via `Properties.Resources` or `AppContext.BaseDirectory + "Assets/..."` |
-| C++ / Qt | `.qrc` resource file; `:/icons/foo.png` at runtime |
-| Tauri | `tauri.conf.json` -> `bundle.resources`; access via `app.path().resource_dir()` |
-| Electron | `electron-builder` `extraResources`; access via `process.resourcesPath` |
-| Python (PyInstaller) | `--add-data "src;dest"`; locate via `sys._MEIPASS` |
+### 4.5 UI hard requirements
 
----
+Apply the `界面硬性要求` section above to every view. Theme tokens, layout rules, control styles, pagination, tooltips, auto-refresh, theme center URLs, settings persistence, and log center details: `references/ui_hard_requirements.md`.
+
+### 4.6 Media acquisition and task persistence pipeline
+
+For media-downloader / republisher desktop apps, use the templates in `references/media_acquisition_playbook.md`:
+
+- `scripts/media_session.py` -- cookies, proxy, retry HTTP session
+- `scripts/media_parser.py` -- page parsing + HLS/m3u8 parsing
+- `scripts/media_downloader.py` -- Range chunk download + resume
+- `scripts/hls_downloader.py` -- m3u8 segments + AES-128 + ffmpeg merge
+- `scripts/captcha_solver.py` -- third-party solver + manual fallback
+- `scripts/browser_session.py` -- Playwright login / cookies / fingerprint
+- `scripts/task_queue.py` -- SQLite persistent queue with crash recovery
+- `scripts/ffmpeg_transcoder.py` -- transcode with live progress
+- `scripts/platform_publisher.py` -- publish adapter interface
+- `scripts/media_dependencies.py` -- check-only dependency manager; pass `--install` to download
+- `scripts/media_pipeline_service.py` -- local HTTP sidecar with optional Bearer token
+- `scripts/setup_media_dependencies.ps1` -- check / install wrapper
+
+Client snippets: `references/media_pipeline_clients.md`; ready-made wrappers: `clients/README.md`.
 
 ## Step 5 -- Package
 
+**Source preservation.** Build and packaging scripts never delete project source. Before packaging, create a timestamped source zip with `scripts/backup_source.ps1`, or pass `-BackupSource` to `scripts/build_python.ps1` / `scripts/build_dotnet.ps1` so the backup runs automatically before the build starts.
+
 ### 5.1 Pick the right packaging tool
 
-| Need | Tool |
-|---|---|
-| Python single-file EXE | PyInstaller `--onefile --windowed` |
-| Python folder + assets | PyInstaller `--onedir` + Inno Setup / NSIS |
-| .NET single-file, fast | `dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=true` |
-| .NET NativeAOT (smallest) | `dotnet publish -p:PublishAot=true` (.NET 8+) |
-| .NET with bundled DLLs | `Costura.Fody` NuGet + `PublishSingleFile=true` |
-| Tauri | `cargo tauri build` (NSIS + MSI + DMG + deb) |
-| Electron | `electron-builder` (NSIS, MSI, AppX, deb, rpm, dmg) |
-| C++ / Qt | `windeployqt` + `cpack` or NSIS |
-| MSI in general | WiX Toolset v3/v4 |
-| MSIX | Visual Studio MSIX Packaging Project, or `msbuild` + `MakeAppx.exe` |
-| Auto-update | Velopack (multi-framework), Squirrel (Electron, C#), WinSparkle (C++/Qt), Sparkle (macOS), AppImageUpdate (Linux) |
-
-Build scripts in **14 PowerShell helpers**:
-- `scripts/build_python.ps1` (PyInstaller; auto-resolves Python from `-PythonExe`, `CODEX_PYTHON`/`PYTHON` env, Codex runtime, or PATH)
-- `scripts/build_dotnet.ps1` (dotnet publish self-contained)
-- `scripts/build_dotnet_nativeaot.ps1` (NativeAOT single-file EXE, win-x64)
-- `scripts/build_tauri.ps1` (Tauri NSIS + MSI)
-- `scripts/build_qt.ps1` (C++/Qt 6 + windeployqt + cpack NSIS/WIX)
-- `scripts/build_electron.ps1` (electron-builder NSIS/MSI/portable)
-- `scripts/build_go_wails.ps1` (Wails v2 NSIS)
-- `scripts/build_go_fyne.ps1` (Fyne package)
-- `scripts/build_go_gio.ps1` (Gio, go build with -H windowsgui + strip)
-- `scripts/build_kotlin_compose.ps1` (Compose Multiplatform gradle)
-- `scripts/build_swift.ps1` (Swift on Windows swift build)
-- `scripts/build_neutralino.ps1` (Neutralino.js neu build)
-- `scripts/build_macos.ps1` (macOS dotnet / cargo / xcodebuild wrapper)
-- `scripts/build_linux.ps1` (Linux dotnet / cargo / go / python wrapper)
-
-Shell packaging helpers: `scripts/build_dmg.sh`, `scripts/build_appimage.sh`,
-`scripts/build_deb.sh`.
-
-Auto-update helpers:
-- `scripts/auto_update_velopack.ps1` (Velopack pack + upload; .NET / Rust / Python / Electron)
-- `scripts/auto_update_squirrel.ps1` (Squirrel.Windows for .NET / Electron)
-- `scripts/auto_update_winsparkle.cpp` (WinSparkle drop-in for C++/Qt/wxWidgets/MFC)
-- `scripts/auto_update_sparkle.swift` (Sparkle 2.x for macOS)
-- `scripts/auto_update_appimage.md` (AppImageUpdate / zsync for Linux)
-
-
-Deep dive in `references/distribution_playbook.md`.
+Build helpers (14 `build_*.ps1`): Python, .NET, NativeAOT, Tauri, Qt, Electron, Go Wails/Fyne/Gio, Kotlin Compose, Swift, Neutralino, macOS, Linux. Shell helpers: `scripts/build_dmg.sh`, `scripts/build_appimage.sh`, `scripts/build_deb.sh`. Auto-update helpers: `scripts/auto_update_velopack.ps1`, `scripts/auto_update_squirrel.ps1`, `scripts/auto_update_winsparkle.cpp`, `scripts/auto_update_sparkle.swift`, `scripts/auto_update_appimage.md`. Exact per-framework recipes: `references/distribution_playbook.md`.
 
 ### 5.2 Signing and antivirus
 
-- Sign with `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a MyApp.exe`
-  before distribution. Unsigned binaries trigger SmartScreen and most EDRs.
-  Or use the packaged helper: `powershell -File scripts/sign_windows.ps1 -File MyApp.exe`.
-- macOS: use `scripts/sign_macos.sh` for codesign + notarytool + stapler.
-- Submit false-positive reports to Microsoft, CrowdStrike, SentinelOne if
-  AV still flags a signed binary.
-- Never instruct the recipient to disable AV.
+- Windows: `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a MyApp.exe`, or `powershell -File scripts/sign_windows.ps1 -File MyApp.exe`.
+- macOS: `scripts/sign_macos.sh` (codesign + notarytool + stapler).
+- Submit false-positive reports to Microsoft / CrowdStrike / SentinelOne if AV still flags a signed binary. Never instruct the recipient to disable AV.
 
 ### 5.3 Auto-update
 
-Velopack (C#, Rust, anything): `vpk pack` + `vpk install`, delta updates,
-Windows installer + portable bundles. https://velopack.io -- see `scripts/auto_update_velopack.ps1`.
-
-Squirrel.Windows (C#, Electron): git-diff updates; Windows-only -- see `scripts/auto_update_squirrel.ps1`.
-
-WinSparkle (C++): drop-in DLL, works with Qt/wxWidgets/MFC -- see `scripts/auto_update_winsparkle.cpp`.
-
-Electron autoUpdater: built into electron-builder; needs a release server -- pair with `scripts/build_electron.ps1`.
-
-Sparkle (macOS): Sparkle 2.x integration -- see `scripts/auto_update_sparkle.swift`.
-
-AppImageUpdate (Linux): self-update for AppImages -- see `scripts/auto_update_appimage.md`.
-
----
+Velopack (C# / Rust / Python / Electron), Squirrel.Windows (C# / Electron), WinSparkle (C++ / Qt), Sparkle (macOS), AppImageUpdate (Linux). Scripts listed in 5.1.
 
 ## Step 6 -- Verify
 
-The universal checklist -- run before handing back:
+Run before handing back:
 
-- [ ] No clickable handler blocks the UI thread.
-- [ ] All workers use the framework's correct cancellation primitive.
-- [ ] Input simulation uses `SendInput` (Win) / `CGEventPost` (mac) / `XTestFakeInputEvent` (X11); never `PostMessage`, memory write, or AHK scripts.
-- [ ] `EnumWindows` / equivalent runs in a thread with a 3 s timeout and a session cache.
-- [ ] Every keyboard key the recipient might need is wired to a real VK / keycode constant.
-- [ ] Single-file EXE launches on a clean Windows VM without the framework's runtime installed.
-- [ ] Source code is bundled inside the EXE (where applicable) and self-extractable on first run.
-- [ ] EXE is code-signed; AV false-positive notes are prepared if needed.
-- [ ] Recipients need zero installs (no .NET SDK, no Python, no Node, no admin).
-- [ ] Auto-update channel verified end-to-end (install v1 -> publish v2 -> app picks up update).
-- [ ] All requirements from Step 0 are met; any deferred items are recorded with a reason.
-
----
+- [ ] No clickable handler blocks the UI thread; workers use correct cancellation.
+- [ ] Input uses `SendInput` / `CGEventPost` / `XTestFakeInputEvent`; never `PostMessage`, memory write, or AHK.
+- [ ] Window enumeration runs with a 3 s timeout and session cache.
+- [ ] Every needed keyboard key maps to a real VK / keycode constant.
+- [ ] Single-file EXE launches on a clean Windows VM without the framework runtime installed.
+- [ ] Source backup zip exists when `-BackupSource` was used (or `scripts/backup_source.ps1` was run).
+- [ ] EXE is code-signed; AV false-positive notes prepared if needed.
+- [ ] Recipients need zero installs and no admin.
+- [ ] Auto-update channel verified end-to-end (install v1 -> publish v2 -> update).
+- [ ] All Step 0 requirements met; deferred items recorded with reasons.
+- [ ] UI-01..UI-18 all pass; any waiver is recorded in requirements.md.
 
 ## Step 7 -- Hand off
 
-Produce a user-facing README that includes:
-- What the app does (1 paragraph)
-- How to install and run (exact commands)
-- How to build from source (for any maintainer)
-- Where logs and config live
-- How to report a bug
-- Known limitations and the showstopper assumption recorded in Step 0
-
----
+Produce a user-facing README with: what the app does, install/run commands, build-from-source instructions, log/config locations, bug-report guidance, known limitations, and the showstopper assumption from Step 0.
 
 ## Deep references (read on demand)
 
-- `references/task_decomposition.md` -- Step 0 + Step 3 deep dive with worked examples
-- `references/framework_matrix.md` -- detailed pros/cons and IDE setup for every framework
-- `references/distribution_playbook.md` -- per-framework packaging, signing, auto-update
+- `references/task_decomposition.md` -- Step 0 + Step 3 deep dive
+- `references/ui_hard_requirements.md` -- UI-01..UI-18 + theme library URLs
+- `references/media_acquisition_playbook.md` -- crawl / HLS / download / transcode / publish
+- `references/media_pipeline_clients.md` -- sidecar clients per desktop language
+- `references/accessibility_cross_platform.md` -- UIA / MSAA / AppleScript / AT-SPI
+- `references/framework_matrix.md` -- detailed pros/cons + threading/resource tables
+- `references/framework_selection_engine.md` -- selector scoring algorithm
+- `references/distribution_playbook.md` -- packaging/signing/auto-update + architecture matrix
+- `references/nativeaot_optimization.md` -- NativeAOT trade-offs and migration
 - `references/win32_recipes.md` -- 13 common Win32 patterns
-- `references/restricted_network_playbook.md` -- offline builds, vendoring, mirrors (Python / .NET / Node / Cargo / Qt)
-- `INDEX.md` -- topic-based navigation: by use case, OS, framework, task
+- `references/restricted_network_playbook.md` -- offline builds and mirrors
+- `INDEX.md` -- topic-based navigation
 
 ## Templates (copy-paste starting points)
 
-- `templates/requirements_checklist.md` -- fill in during Step 0
-- `templates/requirements_brief.md` -- JSON/YAML brief schema for `scripts/select_framework.py`
-- `templates/task_card.md` -- one per task in Step 3
-- `templates/dpi_manifest.xml` -- Per-monitor V2 awareness manifest snippet
-- `templates/gui_framework_decision_tree.md` -- second-level tool picker after language choice
-- `templates/release_checklist.md` -- release gate checklist
-- `templates/security_checklist.md` -- security review checklist
+- `templates/requirements_checklist.md`
+- `templates/requirements_brief.md`
+- `templates/task_card.md`
+- `templates/dpi_manifest.xml`
+- `templates/gui_framework_decision_tree.md`
+- `templates/release_checklist.md`
+- `templates/security_checklist.md`
 
 ## Examples (minimal runnable projects)
 
-- `examples/wpf-threading/` -- C# WPF + `threading_wpf.cs`
-- `examples/winui3-threading/` -- C# WinUI 3 + `threading_winui.cs`
-- `examples/tkinter-threading/` -- Python tkinter + `threading_tkinter.py`
-- `examples/pyside6-threading/` -- Python PySide6 + `threading_pyside6.py`
-- `examples/tauri-threading/` -- Rust + Web + `threading_tauri.rs`
-- `examples/msix-packaging/` -- WPF + Windows App SDK packaged as MSIX
-- `examples/nativeaot-winforms/` -- WinForms NativeAOT single-file EXE
-- `examples/game-automation/` -- TLBB-style: window + SendInput + threading
-
+- `examples/wpf-threading/` -- C# WPF
+- `examples/winui3-threading/` -- C# WinUI 3
+- `examples/tkinter-threading/` -- Python tkinter
+- `examples/pyside6-threading/` -- Python PySide6
+- `examples/tauri-threading/` -- Rust + Web
+- `examples/msix-packaging/` -- WPF + Windows App SDK MSIX
+- `examples/nativeaot-winforms/` -- WinForms NativeAOT
+- `examples/game-automation/` -- window + SendInput + threading
 
 ## Framework selection engine
 
-`scripts/select_framework.py` scores every canonical framework against a
-JSON/YAML requirements brief (schema: `templates/requirements_brief.md`)
-and returns the top 3 with rationale. The selector covers all 23 canonical
-frameworks in `references/framework_matrix.md` (plus Python GTK); the
-matrix provides deeper pros/cons for the same options. See
-`references/framework_selection_engine.md` for the scoring algorithm and
-how to add a new framework.
-
-Run `--self-test` after every change to `scripts/select_framework.py` to
-confirm the 8 canonical cases still produce the expected winner.
+`scripts/select_framework.py` scores a JSON/YAML requirements brief (`templates/requirements_brief.md`) across all 24 canonical frameworks and returns the top 3 with rationale. Run `--self-test` after every change to confirm the canonical cases still produce the expected winner. See `references/framework_selection_engine.md`.
 
 ## Tests (fixtures + smoke tests + CI)
 
-- `tests/smoke_windows.ps1` -- PowerShell parse, Python imports,
-  fixtures, arch check (45 / 45 currently pass on Windows).
-- `tests/smoke_macos.sh` -- bash syntax, PowerShell parse, Python AST +
-  const table, Swift `-parse` (skipped if toolchain absent).
-- `tests/smoke_linux.sh` -- bash syntax, Python AST + const table for the
-  Linux-side scripts (X11 + GTK).
-- `tests/test_arch_awareness.ps1` -- verifies every `build_*.ps1` declares
-  `-Arch` or `-Rid` with a `ValidateSet` covering the framework's
-  platform-appropriate values.
-- `tests/README.md` -- how to run the smoke tests locally + what CI runs.
-- `tests/fixtures/sample.md` -- Markdown input for T5.3-style converter tasks.
-- `tests/fixtures/sample_config.json` -- default settings for a fresh app.
-- `tests/fixtures/AppxManifest.xml` -- minimal packaged-app manifest for MSIX.
-- `.github/workflows/ci.yml` -- lint job plus a three-job smoke matrix on
-  `windows-latest` / `macos-latest` / `ubuntu-latest`.
-
+- `tests/smoke_windows.ps1` -- PowerShell parse, Python imports, fixtures, source backup, arch check, examples AST, BOM regression (77 / 77 currently pass on Windows).
+- `tests/test_no_bom.py` -- rejects UTF-8 BOM / U+FEFF bytes.
+- `tests/smoke_macos.sh` -- bash syntax, PowerShell parse, Python AST, Swift parse (skipped if absent).
+- `tests/smoke_linux.sh` -- bash syntax, PowerShell parse, Python AST for Linux scripts.
+- `tests/test_arch_awareness.ps1` -- verifies every `build_*.ps1` declares `-Arch` / `-Rid`.
+- `tests/README.md` -- how to run locally + what CI runs.
+- `.github/workflows/ci.yml` -- lint job plus a three-job smoke matrix on `windows-latest` / `macos-latest` / `ubuntu-22.04`.

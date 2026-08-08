@@ -3,7 +3,7 @@
 # and runnable locally on any Windows host with PowerShell 5+.
 #
 # Tests:
-#   1. PowerShell parse (AST) on every build_*.ps1 + auto_update_*.ps1.
+#   1. PowerShell parse (AST) on every .ps1 in the skill.
 #   2. Python module imports for sendinput_python.py and
 #      window_enum_python.py (smoke checks the import path).
 #   3. JSON / XML / TOML fixture validity.
@@ -19,6 +19,7 @@ param()
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $scriptsDir = Join-Path $root "scripts"
+. (Join-Path $scriptsDir "find_python.ps1")
 
 $script:passes = 0
 $script:failures = 0
@@ -46,41 +47,16 @@ Write-Host "=== smoke_windows.ps1 ==="
 Write-Host "Skill root: $root"
 Write-Host ""
 
-# Locate Python (Codex runtime first, then PATH).
-$py = $env:CODEX_PYTHON
-if (-not $py) { $py = "C:\Users\xc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" }
-if (-not (Test-Path $py)) {
-    $py = (Get-Command python -ErrorAction SilentlyContinue).Source
-}
+# Locate Python using the shared resolver (CODEX_PYTHON -> PYTHON -> Codex runtime -> PATH).
+$py = Get-ProjectPython
 if (-not $py) {
     Write-Host "  [WARN] python not found; skipping python-based tests" -ForegroundColor Yellow
 }
 
-# 1. PowerShell parse all build_*.ps1 + auto_update_*.ps1
+# 1. PowerShell parse every .ps1 in the skill (scripts, tests, examples)
 Write-Host "--- powershell parse ---"
-Get-ChildItem "$scriptsDir" -Filter "build_*.ps1" | ForEach-Object {
-    Run-Test "$($_.Name) parse" {
-        $errors = $null
-        [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
-        -not $errors
-    }
-}
-Get-ChildItem "$scriptsDir" -Filter "auto_update_*.ps1" | ForEach-Object {
-    Run-Test "$($_.Name) parse" {
-        $errors = $null
-        [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
-        -not $errors
-    }
-}
-Get-ChildItem "$scriptsDir" -Filter "sign_*.ps1" | ForEach-Object {
-    Run-Test "$($_.Name) parse" {
-        $errors = $null
-        [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
-        -not $errors
-    }
-}
-Get-ChildItem "$scriptsDir" -Filter "bootstrap_*.ps1" | ForEach-Object {
-    Run-Test "$($_.Name) parse" {
+Get-ChildItem $root -Recurse -Filter "*.ps1" | ForEach-Object {
+    Run-Test "$($_.FullName.Substring($root.Length + 1)) parse" {
         $errors = $null
         [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
         -not $errors
@@ -118,6 +94,14 @@ print('OK')
         & $py "$root\tests\test_docs.py" 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
     }
+    Run-Test "test_media_pipeline.py" {
+        & $py "$root\tests\test_media_pipeline.py" 2>&1 | Out-Null
+        $LASTEXITCODE -eq 0
+    }
+    Run-Test "test_no_bom.py" {
+        & $py "$root\tests\test_no_bom.py" 2>&1 | Out-Null
+        $LASTEXITCODE -eq 0
+    }
     Run-Test "game-automation example imports" {
         $script = @"
 import importlib.util
@@ -128,6 +112,31 @@ print('OK')
 "@
         & $py -c $script 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
+    }
+}
+
+# 2.5 Shared Python resolver regression
+if ($py) {
+    Write-Host ""
+    Write-Host "--- shared python resolver ---"
+    Run-Test "find_python.ps1 resolves an interpreter" {
+        $resolved = Get-ProjectPython
+        [bool]$resolved -and (Test-Path -LiteralPath $resolved)
+    }
+    Run-Test "find_python.ps1 honors PYTHON env" {
+        $real = Get-ProjectPython
+        if (-not $real) { $false } else {
+            $oldCodex = $env:CODEX_PYTHON
+            $oldPython = $env:PYTHON
+            $env:CODEX_PYTHON = Join-Path $env:TEMP "missing-codex-python.exe"
+            $env:PYTHON = $real
+            try {
+                (Get-ProjectPython) -eq $real
+            } finally {
+                $env:CODEX_PYTHON = $oldCodex
+                $env:PYTHON = $oldPython
+            }
+        }
     }
 }
 
@@ -163,6 +172,61 @@ if ($py) {
     }
 }
 
+# 3.5 Source preservation
+Write-Host ""
+Write-Host "--- source preservation ---"
+Run-Test "backup_source.ps1 zips fixtures" {
+    $tmp = Join-Path $env:TEMP ("backup-test-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    try {
+        $backupDir = Join-Path $tmp "out"
+        powershell -ExecutionPolicy Bypass -File (Join-Path $scriptsDir "backup_source.ps1") `
+            -SourcePath (Join-Path $root "tests\fixtures") `
+            -OutputDir $backupDir `
+            -Name fixtures 2>&1 | Out-Null
+        $exit = $LASTEXITCODE
+        $zip = Get-ChildItem $backupDir -Filter "fixtures_source_*.zip" -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if ($exit -ne 0 -or -not $zip -or $zip.Length -eq 0) { $false } else { $true }
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
+    }
+}
+Run-Test "backup_source.ps1 excludes exact segment names only" {
+    $tmp = Join-Path $env:TEMP ("backup-seg-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path (Join-Path $tmp "src\build") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $tmp "src\mybuild") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $tmp "out") -Force | Out-Null
+    try {
+        Set-Content -LiteralPath (Join-Path $tmp "src\keep.txt") -Value "keep" -NoNewline
+        Set-Content -LiteralPath (Join-Path $tmp "src\build\exclude.txt") -Value "exclude" -NoNewline
+        Set-Content -LiteralPath (Join-Path $tmp "src\mybuild\keep.txt") -Value "keep2" -NoNewline
+        powershell -ExecutionPolicy Bypass -File (Join-Path $scriptsDir "backup_source.ps1") `
+            -SourcePath (Join-Path $tmp "src") `
+            -OutputDir (Join-Path $tmp "out") `
+            -Name segtest 2>&1 | Out-Null
+        $exit = $LASTEXITCODE
+        $zip = Get-ChildItem (Join-Path $tmp "out") -Filter "segtest_source_*.zip" -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        $foundKeep = $false
+        $foundBuild = $false
+        if ($exit -eq 0 -and $zip) {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+            try {
+                $names = @($archive.Entries | ForEach-Object { $_.FullName })
+                $foundKeep = [bool]($names | Where-Object { $_ -match 'mybuild[/\\]keep\.txt$' })
+                $foundBuild = [bool]($names | Where-Object { $_ -match 'build[/\\]exclude\.txt$' })
+            } finally {
+                $archive.Dispose()
+            }
+        }
+        if ($exit -ne 0 -or -not $zip -or -not $foundKeep -or $foundBuild) { $false } else { $true }
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
+    }
+}
+
 # 4. test_arch_awareness.ps1
 Write-Host ""
 Write-Host "--- arch awareness ---"
@@ -190,6 +254,12 @@ if ($py) {
             $LASTEXITCODE -eq 0
         }
     }
+    Get-ChildItem "$root\examples" -Recurse -Filter "*.py" | ForEach-Object {
+        Run-Test "$($_.FullName.Substring($root.Length + 1)) ast.parse" {
+            & $py -c "import ast; ast.parse(open(r'$($_.FullName)', encoding='utf-8').read())"
+            $LASTEXITCODE -eq 0
+        }
+    }
 }
 
 # 6. SendInput template semantics (source-level regression guard)
@@ -212,6 +282,14 @@ Run-Test "sendinput templates: down/up not batched" {
         Write-Host "  Batching in: $($bad -join ', ')"
         $false
     }
+}
+Run-Test "build_linux.ps1 uses Linux-compatible Go flags" {
+    $text = Get-Content (Join-Path $scriptsDir "build_linux.ps1") -Raw
+    $text -notmatch '-H windowsgui'
+}
+Run-Test "build_go_fyne.ps1 derives EXE name from AppId" {
+    $text = Get-Content (Join-Path $scriptsDir "build_go_fyne.ps1") -Raw
+    $text -notmatch 'env:AppId.*Substring'
 }
 
 # Summary

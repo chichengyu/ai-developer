@@ -49,6 +49,8 @@ release issue and tick each one.
 
 - [ ] **must**: The app does not require elevation unless absolutely
   necessary. If it does, the reason is documented in `requirements.md`.
+- [ ] **should**: Local sidecar services bind to `127.0.0.1` and require
+  a per-session Bearer token unless the app explicitly disables it.
 - [ ] **must**: COM initialisation matches the threading model
   (STA vs MTA). Mis-matched COM throws `RPC_E_CHANGED_MODE` at runtime.
 - [ ] **must**: No `Process.Start` with user-controlled strings without

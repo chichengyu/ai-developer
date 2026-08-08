@@ -221,7 +221,7 @@ For Python, use `pywin32`'s `win32serviceutil`. For C++, use the
 
 ## R13: Accessibility automation
 
-If you must drive another apps UI, prefer the supported accessibility
+If you must drive another app's UI, prefer the supported accessibility
 APIs over SendInput or memory write. They are detectable by the target
 app (it can refuse), but they are the legitimate path for productivity
 apps and accessibility tools.
@@ -254,19 +254,3 @@ the only supported path. See `scripts/sendinput_python.py`.
 | Game with anti-cheat                | SendInput (UIA / MSAA blocked)             |
 | Accessibility / NVDA-style reader   | UIA                                        |
 | UI testing (WinAppDriver, FlaUI)    | UIA + InvokePattern                        |
-## R13: Accessibility automation
-
-If you must drive another app's UI:
-- **UI Automation** (`UIAutomationCore.dll`): the supported, accessibility-grade
-  API for reading and driving another app's UI. Works in .NET via
-  `UIAutomationClient`/`UIAutomationProvider` and in Python via `pywinauto`.
-- **MSAA** (Microsoft Active Accessibility): legacy, still works for older
-  apps. `oleacc.dll`.
-- **SendInput**: drives the OS input stack directly (see R1).
-
-Prefer UIA > MSAA > SendInput > memory write, in that order. UIA is detectable
-by the target app (it can refuse), but it's the most legitimate choice.
-
-For game anti-cheat, UIA and MSAA are usually blocked; SendInput is the only
-supported path.
-

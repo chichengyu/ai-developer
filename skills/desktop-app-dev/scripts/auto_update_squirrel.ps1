@@ -37,8 +37,12 @@ Copy-Item (Split-Path $MainExe -Parent) $stage -Recurse -Force
 
 # The exe MUST be named the same as the package id, so rename if needed.
 $target = Join-Path $stage "$Title.exe"
-if ($MainExe -ne $target) {
-    Move-Item -Path $MainExe -Destination $target -Force
+if (Test-Path -LiteralPath $target) {
+    if ((Resolve-Path -LiteralPath $MainExe).Path -ne (Resolve-Path -LiteralPath $target).Path) {
+        Copy-Item -LiteralPath $MainExe -Destination $target -Force
+    }
+} else {
+    Copy-Item -LiteralPath $MainExe -Destination $target
 }
 
 $relArgs = @("--releasify", $stage,

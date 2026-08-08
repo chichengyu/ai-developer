@@ -95,8 +95,12 @@ Test-ArchParam -ScriptPath (Join-Path $scriptsDir "build_linux.ps1")        -Exp
 Write-Host ""
 Write-Host "=== Host architecture ==="
 $hostArch = if ([System.Environment]::Is64BitOperatingSystem) {
-    if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq "Arm64") { "arm64" }
-    else { "x64" }
+    try {
+        if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq "Arm64") { "arm64" }
+        else { "x64" }
+    } catch {
+        if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+    }
 } else { "x86" }
 Write-Host "  Build host arch: $hostArch"
 

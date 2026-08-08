@@ -10,6 +10,8 @@
 #   powershell -File build_linux.ps1 -Tool dotnet -Project src/MyApp -Arch x64
 #   powershell -File build_linux.ps1 -Tool cargo  -Project src-tauri -Arch arm64
 #   powershell -File build_linux.ps1 -Tool go     -Project . -Arch arm64
+#   powershell -File build_linux.ps1 -Tool cargo  -Project src-tauri -Install
+#   powershell -File build_linux.ps1 -Tool python -Project src/app.py -Install
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [ValidateSet("dotnet","cargo","go","python")] [string] $Tool,
@@ -17,7 +19,8 @@ param(
     [ValidateSet("x64","arm64")]
     [string] $Arch = "x64",
     [string] $Configuration = "Release",
-    [string] $OutputDir = "dist"
+    [string] $OutputDir = "dist",
+    [switch] $Install                  # install missing tauri-cli / Rust target / PyInstaller; default is check-only
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,10 +49,17 @@ elseif ($Tool -eq "cargo") {
         throw "cargo not on PATH. Install Rust from https://rustup.rs"
     }
     if (-not (Get-Command cargo-tauri -ErrorAction SilentlyContinue)) {
+        if (-not $Install) {
+            throw "cargo-tauri is not installed. Run with -Install to install it, or run: cargo install tauri-cli --version '^2.0' --locked"
+        }
         Write-Host "==> Installing tauri-cli" -ForegroundColor Cyan
         cargo install tauri-cli --version "^2.0" --locked
     }
-    rustup target add $entry.Triple 2>$null
+    if ($Install) {
+        rustup target add $entry.Triple
+    } else {
+        Write-Host "==> Ensure Rust target is installed: rustup target add $($entry.Triple) (or pass -Install)" -ForegroundColor Yellow
+    }
     Push-Location $Project
     try {
         & cargo tauri build --target $entry.Triple
@@ -65,17 +75,26 @@ elseif ($Tool -eq "go") {
     Write-Host "==> GOOS=linux GOARCH=$($entry.GoArch) go build" -ForegroundColor Cyan
     Push-Location $Project
     try {
-        & go build -ldflags "-s -w -H windowsgui" -o "$OutputDir/myapp"
+        & go build -ldflags "-s -w" -o "$OutputDir/myapp"
         if ($LASTEXITCODE -ne 0) { throw "go build failed" }
     } finally { Pop-Location }
 }
 elseif ($Tool -eq "python") {
     Write-Host "==> PyInstaller is host-bound; on Linux it produces a Linux ELF." -ForegroundColor Cyan
     Write-Host "==> Run this script on the Linux target, not from Windows." -ForegroundColor Yellow
-    if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
-        throw "pyinstaller not on PATH. pip install pyinstaller on the target."
+    $py3 = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $py3) { throw "python3 not on PATH. Install Python 3 on the target." }
+    & $py3.Source -c "import PyInstaller" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        if (-not $Install) {
+            throw "PyInstaller is not installed. Run with -Install to install it, or run: $($py3.Source) -m pip install pyinstaller"
+        }
+        Write-Host "==> Installing PyInstaller" -ForegroundColor Cyan
+        & $py3.Source -m pip install pyinstaller
+        if ($LASTEXITCODE -ne 0) { throw "PyInstaller install failed" }
     }
-    & pyinstaller --onefile --name myapp $Project
+    & $py3.Source -m PyInstaller --onefile --name myapp $Project
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 }
 
 Write-Host "==> Done. Next: package as .deb / .rpm / AppImage / Flatpak / Snap" -ForegroundColor Green

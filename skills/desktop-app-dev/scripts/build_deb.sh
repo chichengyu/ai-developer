@@ -4,7 +4,7 @@
 # Run on a Debian/Ubuntu host. Requires dpkg-deb (built-in) and fakeroot.
 #
 # Usage:
-#   ./build_deb.sh ./myapp myapp "1.0.0" "My Company" "optional description"
+#   ./build_deb.sh ./myapp myapp "1.0.0" "My Company" "optional description" [amd64|arm64]
 
 set -euo pipefail
 
@@ -13,6 +13,16 @@ PKG_NAME="${2:-myapp}"
 VERSION="${3:-0.1.0}"
 VENDOR="${4:-Vendor}"
 DESCRIPTION="${5:-Cross-platform desktop app}"
+ARCH="${6:-amd64}"
+
+case "$ARCH" in
+    amd64|x86_64) DEB_ARCH="amd64" ;;
+    arm64|aarch64) DEB_ARCH="arm64" ;;
+    *)
+        echo "Unsupported package arch: $ARCH (use amd64 or arm64)" >&2
+        exit 1
+        ;;
+esac
 
 if [[ -z "$BIN_PATH" || ! -x "$BIN_PATH" ]]; then
     echo "Usage: $0 <elf-binary> <pkg-name> <version> <vendor> [description]" >&2
@@ -43,13 +53,13 @@ Package: ${PKG_NAME}
 Version: ${VERSION}
 Section: utils
 Priority: optional
-Architecture: amd64
+Architecture: ${DEB_ARCH}
 Maintainer: ${VENDOR}
 Description: ${DESCRIPTION}
 Installed-Size: ${SIZE}
 EOF
 
-OUT="${PKG_NAME}_${VERSION}_amd64.deb"
+OUT="${PKG_NAME}_${VERSION}_${DEB_ARCH}.deb"
 echo "==> dpkg-deb --build $STAGE $OUT"
 fakeroot dpkg-deb --build "$STAGE" "$OUT"
 rm -rf "$STAGE"

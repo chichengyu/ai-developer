@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # smoke_linux.sh -- runnable smoke test for the Linux-side scripts in
-# this skill. Designed for `ubuntu-latest` GitHub Actions runners but
+# this skill. Designed for `ubuntu-22.04` GitHub Actions runners but
 # runnable on any Linux host with bash + python3.
 #
 # Tests:
@@ -50,15 +50,15 @@ done
 echo ""
 echo "--- powershell parse ---"
 if command -v pwsh >/dev/null 2>&1; then
-    for f in build_linux.ps1 build_dotnet.ps1 build_electron.ps1; do
-        if [[ -f "$SCRIPTS/$f" ]]; then
-            run "$f pwsh parse" pwsh -NoProfile -Command "
-                \$errors = \$null; \$null = [System.Management.Automation.Language.Parser]::ParseFile(
-                    '$SCRIPTS/$f', [ref]\$null, [ref]\$errors);
-                if (\$errors) { \$errors | Out-String; exit 1 } else { exit 0 }
-            "
-        fi
-    done
+    run "all .ps1 parse" pwsh -NoProfile -Command "
+        \$errors = @()
+        Get-ChildItem -Path '$SKILL_ROOT' -Recurse -Filter '*.ps1' | ForEach-Object {
+            \$e = \$null
+            [System.Management.Automation.Language.Parser]::ParseFile(\$_.FullName, [ref]\$null, [ref]\$e) | Out-Null
+            if (\$e) { \$errors += \$e }
+        }
+        if (\$errors.Count -gt 0) { \$errors | Out-String; exit 1 } else { exit 0 }
+    "
 else
     echo "  [SKIP] pwsh not installed (sudo apt install powershell)"
 fi
@@ -107,6 +107,31 @@ if command -v python3 >/dev/null 2>&1; then
         bn="$(basename "$f")"
         run "$bn ast.parse" python3 -c "import ast; ast.parse(open(r'$f', encoding='utf-8').read())"
     done
+    echo ""
+    echo "--- python AST parse all .py in examples/ ---"
+    while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        bn="${f#"$SKILL_ROOT"/}"
+        run "$bn ast.parse" python3 -c "import ast; ast.parse(open(r'$f', encoding='utf-8').read())"
+    done < <(find "$SKILL_ROOT/examples" -type f -name '*.py' -not -path '*/__pycache__/*' | sort)
+fi
+
+# 5. Python structural + media tests
+echo ""
+echo "--- python structural + media tests ---"
+if command -v python3 >/dev/null 2>&1; then
+    run "test_docs.py" python3 "$SKILL_ROOT/tests/test_docs.py"
+    run "test_media_pipeline.py" python3 "$SKILL_ROOT/tests/test_media_pipeline.py"
+    run "test_no_bom.py" python3 "$SKILL_ROOT/tests/test_no_bom.py"
+fi
+
+# 6. Arch awareness (optional, requires PowerShell)
+echo ""
+echo "--- arch awareness ---"
+if command -v pwsh >/dev/null 2>&1; then
+    run "test_arch_awareness.ps1" pwsh -NoProfile -ExecutionPolicy Bypass -File "$SKILL_ROOT/tests/test_arch_awareness.ps1"
+else
+    echo "  [SKIP] pwsh not installed"
 fi
 
 # Summary

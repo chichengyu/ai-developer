@@ -2,6 +2,7 @@
 #
 # Usage: powershell -ExecutionPolicy Bypass -File build_go_fyne.ps1
 #        powershell -File build_go_fyne.ps1 -Arch arm64
+#        powershell -File build_go_fyne.ps1 -Install
 [CmdletBinding()]
 param(
     [string] $AppId = "com.example.myapp",
@@ -10,7 +11,8 @@ param(
     [switch] $NoConsole,
     [switch] $Strip,
     [ValidateSet("x64", "arm64", "x86")]
-    [string] $Arch = "x64"
+    [string] $Arch = "x64",
+    [switch] $Install                  # install missing fyne CLI; default is check-only
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +24,9 @@ Write-Host "==> Building GOARCH=$goArch (Arch=$Arch)" -ForegroundColor Cyan
 
 if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw "go not on PATH. Install Go from https://go.dev/dl/" }
 if (-not (Get-Command fyne -ErrorAction SilentlyContinue)) {
+    if (-not $Install) {
+        throw "fyne CLI is not installed. Run with -Install to install it, or run: go install fyne.io/fyne/v2/cmd/fyne@latest"
+    }
     Write-Host "==> Installing fyne CLI" -ForegroundColor Cyan
     go install fyne.io/fyne/v2/cmd/fyne@latest
     $env:PATH = "$env:USERPROFILE\go\bin;$env:PATH"
@@ -37,7 +42,7 @@ if ($LASTEXITCODE -ne 0) { throw "fyne package failed" }
 
 # Optionally strip debug info and hide console
 if ($Strip -or $NoConsole) {
-    $exe = "${env:AppId}.exe".Substring($AppId.LastIndexOf('.') + 1) + ".exe"
+    $exe = ($AppId -split '\.')[-1] + ".exe"
     if (-not (Test-Path $exe)) {
         Get-ChildItem -Filter *.exe | Select-Object -First 1 | ForEach-Object { $exe = $_.Name }
     }

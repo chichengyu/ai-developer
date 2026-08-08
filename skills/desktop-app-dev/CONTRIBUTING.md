@@ -39,12 +39,13 @@ tests/                smoke tests + fixtures
    sample entries without doing any hardware I/O.
 5. Add the new file to `pyproject.toml` `[tool.ruff.lint.per-file-ignores]`
    if your style choices are non-default (e.g. unused `VK` entries).
-6. Add a row to the architecture support matrix in `SKILL.md` "Scope
-   and limits".
+6. Add a row to the architecture support matrix in
+   `references/distribution_playbook.md`.
 
-Smoke coverage is automatic: `tests/smoke_windows.ps1` runs
-`python -c "import ast; ast.parse(...)"` on every `.py` in `scripts/`,
-and `tests/smoke_macos.sh` / `smoke_linux.sh` do the same.
+Smoke coverage is automatic: `tests/smoke_windows.ps1`,
+`tests/smoke_macos.sh`, and `tests/smoke_linux.sh` run
+`python -c "import ast; ast.parse(...)"` on every `.py` in `scripts/` and
+`examples/`. `tests/test_no_bom.py` rejects BOM / U+FEFF bytes.
 
 ## Adding a new window-enumeration language
 
@@ -61,12 +62,12 @@ Same pattern as SendInput but export:
 
 1. Add a `scripts/build_<framework>.ps1` (or `.sh`) that accepts
    `-Arch x64|arm64|x86` (or the framework's native equivalent) with
-   a `[ValidateSet(...)]`. See the existing 13 `build_*.ps1` files.
+   a `[ValidateSet(...)]`. See the existing 14 `build_*.ps1` files.
 2. If the framework uses a threading model not covered by the existing
-   four (`threading_wpf.cs`, `threading_tkinter.py`,
-   `threading_pyside6.py`, `threading_tauri.rs`, `threading_dispatch.swift`,
-   `threading_glib.py`), add a new `scripts/threading_<framework>.<ext>`.
-3. Add a row to the framework matrix in `SKILL.md` step 2.
+   `threading_*` templates, add a new
+   `scripts/threading_<framework>.<ext>`.
+3. Add a deep-dive section to `references/framework_matrix.md` and a
+   canonical framework entry to `scripts/select_framework.py`.
 4. Add the script to `tests/test_arch_awareness.ps1` so the
    `-Arch` / `-Rid` parameter is structurally verified on every PR.
 5. Optionally add `examples/<framework>-threading/` so users have a
@@ -80,8 +81,8 @@ Same pattern as SendInput but export:
    templates. The single source of truth lives in `scripts/`.
 3. Include a `README.md` with: prerequisites, run command, package
    command (referencing `scripts/build_*.ps1`).
-4. If the example introduces a new build target or platform, add a
-   smoke-test entry to `tests/smoke_windows.ps1`.
+4. Python examples get automatic AST smoke coverage; add a behavioral
+   smoke-test entry only when the example needs runtime checks.
 
 ## Adding a new packaging format
 
@@ -89,12 +90,12 @@ Same pattern as SendInput but export:
 2. Reference it from the "Packaging" section of `INDEX.md` (By task
    -> "I need to package for distribution").
 3. If the format is OS-specific, add a row to the architecture support
-   matrix in `SKILL.md` "Scope and limits".
+   matrix in `references/distribution_playbook.md`.
 
 ## Adding a new auto-update channel
 
 1. Add a `scripts/auto_update_<channel>.{ps1,cpp,swift,...}` that
-   matches the existing `auto_update_veloappck.ps1` /
+   matches the existing `auto_update_velopack.ps1` /
    `auto_update_squirrel.ps1` / `auto_update_winsparkle.cpp` /
    `auto_update_sparkle.swift` / `auto_update_appimage.md` API surface
    (init, check, shutdown, apply).
@@ -111,22 +112,27 @@ pre-commit run --all-files
 ```
 
 The hooks run:
+- trailing-whitespace / end-of-file / merge-conflict checks
+- YAML, JSON, TOML, and XML validity
 - `ruff check` and `ruff format --check`
 - `mypy scripts/`
-- `tests/smoke_windows.ps1` (Windows-only; skipped on macOS / Linux
-  runners automatically)
+- PowerShell parse for every `.ps1`
+
+Smoke tests are not a pre-commit hook. Run `tests/run_lint.ps1`
+(check-only by default) or the CI jobs after changes.
 
 ## CI
 
 Every push to `main` and every PR runs `.github/workflows/ci.yml`,
-which has three jobs:
+which has four jobs (lint plus three smoke jobs):
 
+- `lint` on `ubuntu-22.04`
 - `test-windows` on `windows-latest`
 - `test-macos` on `macos-latest`
 - `test-linux` on `ubuntu-22.04`
 
-Each job installs Python 3.12 + PowerShell, then runs the matching
-smoke test (`tests/smoke_windows.ps1` / `smoke_macos.sh` /
+Smoke jobs install Python 3.12 + PowerShell where needed, then run the
+matching smoke test (`tests/smoke_windows.ps1` / `smoke_macos.sh` /
 `smoke_linux.sh`). Failure artifacts upload for 7 days.
 
 ## Versioning
@@ -140,6 +146,9 @@ tags.
 
 - Python: ruff config in `pyproject.toml`. Target Python 3.10+ (matches
   the Codex runtime).
+- SKILL.md is the only file auto-loaded into context. Keep it slim:
+  put detailed tables, recipes, and matrices in `references/`, then add
+  a one-line pointer from SKILL.md.
 - PowerShell: target Windows PowerShell 5.1 AND PowerShell 7+ (no
   ternary operator from PS7 only). Use `[CmdletBinding()]`,
   `[Parameter(Mandatory)]`, `[ValidateSet(...)]` for new scripts.

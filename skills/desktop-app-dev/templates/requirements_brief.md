@@ -3,13 +3,17 @@
 Fill this in **before** Step 2 in SKILL.md. The framework auto-selector reads
 this brief and returns the top 3 ranked candidates with rationale.
 
-The brief can be JSON (preferred) or a flat `key: value` YAML shape. Save it
-as `requirements.json` (or any name) and run:
+The brief can be JSON (preferred) or a flat `key: value` YAML shape. YAML
+must use inline `[...]` values for lists (for example
+`target_os: [["windows", "x64"]]`); indented block lists are not supported.
+Save it as `requirements.json` (or any name) and run:
 
 ```powershell
 python scripts\select_framework.py requirements.json
 python scripts\select_framework.py requirements.json --json    # machine-readable
 ```
+
+UTF-8 BOM is accepted and stripped automatically.
 
 ---
 
@@ -107,3 +111,12 @@ Output: **C# / Avalonia 11**. WPF would win if you drop Linux / macOS.
 
 Output: **C# / WinUI 3** (only framework that ships to Microsoft Store with
 modern Fluent design).
+
+## YAML form
+
+```yaml
+target_os: [["windows", "x64"], ["macos", "arm64"]]
+team_languages: [python, csharp]
+web_ui_required: false
+distribution: installer
+```

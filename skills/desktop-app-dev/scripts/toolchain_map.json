@@ -68,6 +68,7 @@
     "wails": ["go"],
     "fyne": ["go"],
     "gio": ["go"],
+    "walk": ["go"],
     "compose_multiplatform": ["java"],
     "tornadofx": ["java"],
     "javafx": ["java"],

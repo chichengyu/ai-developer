@@ -36,7 +36,7 @@ Do I want Windows 11 Fluent design (rounded corners, mica)?
 └── No → WPF (mature, designer works, 90% of LOB apps)
          │
          ├── Is the app data-heavy (grid, charts)?
-         │   └── WPF + LiveCharts2 + CommunityToolkit.Wpfdataload
+         │   └── WPF + LiveCharts2 + CommunityToolkit.Mvvm
          ├── Need full Win32 interop?
          │   └── WPF + LibraryImport (P/Invoke)
          └── Need cross-platform later?
@@ -134,4 +134,4 @@ Apple-first, occasional Windows port?
 - **tkinter for a data grid with 100k rows.** Use PySide6 + QTableView with a model.
 - **Tauri for a CLI tool.** It's a desktop framework; for CLI use clap or argh.
 - **Compose Multiplatform on Windows in 2026.** Still maturing; expect rough edges.
-- **Avalonia if the team already knows WPF.** Stay on WPF unless you need macOS/Linux.
+- **Avalonia for a Windows-only app.** Stay on WPF unless you need macOS/Linux.

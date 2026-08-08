@@ -1,11 +1,61 @@
 # Framework matrix (deep dive)
 
-Detailed pros, cons, project templates, and IDE setup for every framework
-in the main SKILL.md matrix. This file is broader than the automated
-selector: `scripts/select_framework.py` scores all 23 canonical frameworks,
-which covers every framework in this matrix plus Python GTK. Read it when
-the user has narrowed the choice to two or three candidates and needs to
-commit.
+Detailed pros, cons, project templates, and IDE setup for every canonical
+framework. `scripts/select_framework.py` scores all 24 frameworks. Read it
+when the user has narrowed the choice to two or three candidates and needs
+to commit.
+
+---
+
+## Quick decision tree
+
+```
+Need WPF/WinUI look on Windows-only?           -> C# / .NET (WPF or WinUI 3)
+Need cross-platform desktop, modern UI?        -> Tauri (Rust+Web) or .NET MAUI
+Need cross-platform + JS team only?            -> Electron or Tauri
+Need max performance + small EXE?              -> C++/Qt or Rust+Slint/egui
+Need fastest prototype, Python team?           -> Python (tkinter or PySide6)
+Need single portable EXE?                      -> .NET NativeAOT, Tauri, Rust+Slint, PyInstaller
+Need legacy Win32/MFC/ActiveX interop?         -> C#/.NET + P/Invoke, or C++/Qt
+Need GPU rendering (3D, shaders)?              -> C++/Qt Quick, Rust+wgpu, or C# + Vortice.Windows
+Need cross-platform + Go team?                 -> Wails (Go+Web) or Fyne
+Need Windows-only native Go UI?                -> walk (Win32 bindings for Go)
+Need cross-platform + Kotlin team?             -> Compose Multiplatform (Desktop)
+Need JVM desktop with declarative UI?          -> TornadoFX (Kotlin/JavaFX DSL)
+Need macOS-first, Swift-only codebase?         -> SwiftUI + AppKit
+Want Electron-like TypeScript, tiny EXE?       -> Neutralino.js (no Chromium bundled)
+```
+
+## Threading bridge quick reference
+
+| Framework | Background primitive | UI bridge |
+|---|---|---|
+| C# / WPF, WinUI 3 | `Task.Run(...)` | `await` + `DispatcherQueue.TryEnqueue` / `Dispatcher.InvokeAsync` |
+| C# / WinForms | `Task.Run` | `this.Invoke(...)` |
+| Avalonia | `Task.Run` | `Dispatcher.UIThread.Post(...)` |
+| C++ / Qt | `QThread`, `QtConcurrent::run` | `QMetaObject::invokeMethod(target, ..., Qt::QueuedConnection)` |
+| Tauri (Rust) | `tokio::spawn` / `tauri::async_runtime::spawn` | `window.emit("event", payload)` |
+| Electron | `worker_threads` or child process | `mainWindow.webContents.send("event", payload)` |
+| Python / tkinter | `threading.Thread(daemon=True)` | `root.after(0, callback)` |
+| Python / PySide6 | `QThread` or `QThreadPool` | Signal/slot (auto-queued) |
+| Flutter Desktop | `Isolate.spawn` / `compute` | Stream / Completer |
+| Go (Fyne) | `go func()` | `fyne.Do(func(){...})` or channel |
+| Go (Wails) | `go func()` | `runtime.EventsEmit(ctx, "event", payload)` |
+| Go (walk) | `go func()` | `walk.Window.RunSafe(func(){...})` |
+| Kotlin (Compose Desktop) | `launch { ... }` (coroutine) | `withContext(Dispatchers.Main) { ... }` |
+| Kotlin (TornadoFX) | `runAsync { ... }` | UI thread auto (JavaFX Application Thread) |
+| Swift (SwiftUI) | `Task { ... }` | `@MainActor` or `await MainActor.run { ... }` |
+| Java / JavaFX | `Task` + `Service` | `Platform.runLater(...)` |
+
+## Resource embedding quick reference
+
+| Framework | How to embed and locate assets at runtime |
+|---|---|
+| C# / .NET | Mark files as `Resource` or `Content` in csproj; access via `Properties.Resources` or `AppContext.BaseDirectory + "Assets/..."` |
+| C++ / Qt | `.qrc` resource file; `:/icons/foo.png` at runtime |
+| Tauri | `tauri.conf.json` -> `bundle.resources`; access via `app.path().resource_dir()` |
+| Electron | `electron-builder` `extraResources`; access via `process.resourcesPath` |
+| Python (PyInstaller) | `--add-data "src;dest"`; locate via `sys._MEIPASS` |
 
 ---
 
@@ -22,6 +72,21 @@ commit.
 - **Recommended libs**: CommunityToolkit.Mvvm (MVVM helpers), LiveCharts2 / OxyPlot
   (charts), Microsoft.Extensions.DependencyInjection (DI), Serilog (logging).
 - **P/Invoke tip**: prefer `LibraryImport` (.NET 7+) over `[DllImport]` for AOT safety.
+
+## C# / WinForms (.NET 8+)
+
+- **Best for**: Windows-only tool-style apps where fastest .NET development
+  and the smallest .NET EXE matter.
+- **Pros**: mature designer, simple control model, NativeAOT-friendly,
+  `Control.BeginInvoke` threading is straightforward.
+- **Cons**: Windows-only, dated look, data-grid virtualization weaker than WPF.
+- **Cold start**: ~0.4 s.
+- **EXE size**: ~5 MB NativeAOT, ~70 MB self-contained.
+- **Project template**: `dotnet new winforms -n MyApp`.
+- **Recommended libs**: CommunityToolkit.Mvvm (light), `System.Text.Json`
+  source generators.
+- **Packaging**: `scripts/build_dotnet.ps1` /
+  `scripts/build_dotnet_nativeaot.ps1`.
 
 ## C# / WinUI 3
 
@@ -125,6 +190,17 @@ commit.
 - **Pros**: full Qt 6 from Python, LGPL, signals/slots model.
 - **Cons**: large dependency, cold start slower than tkinter, PyInstaller bundle is big.
 - **Packaging**: PyInstaller with `--hidden-import PySide6.QtCore --hidden-import PySide6.QtWidgets`.
+
+## Python / GTK (PyGObject)
+
+- **Best for**: GNOME-first Linux desktop apps and utilities on systems with
+  GTK already installed.
+- **Pros**: native GNOME / Adwaita look, GObject ecosystem, no WebView runtime.
+- **Cons**: Windows / macOS packaging is fragile, PyInstaller must bundle GIR
+  typelibs, cross-platform consistency is weak.
+- **Threading**: `scripts/threading_glib.py` (GLib `idle_add` bridge).
+- **Packaging**: `scripts/build_python.ps1` on Linux targets, or distro
+  package files.
 
 ## Flutter Desktop
 
@@ -233,9 +309,6 @@ commit.
 - **Cross-platform + .NET team**: .NET MAUI or Avalonia
 - **Cross-platform + C++ team**: Qt 6
 - **Cross-platform + Rust team**: Tauri
-- **Cross-platform + Rust team**: Tauri
-- **Cross-platform + Go team**: Wails (web frontend) or Fyne (native widgets)
-- **Windows-only + Go team**: walk (Win32 bindings)
 - **Cross-platform + Go team**: Wails (web frontend) or Fyne (native widgets)
 - **Windows-only + Go team**: walk (Win32 bindings)
 - **Game automation**: C# or C++ (P/Invoke to Win32, SendInput)
@@ -248,8 +321,9 @@ commit.
 - **Apple-first, want Windows too**: Swift + SwiftUI/AppKit
 - **Enterprise with existing Java**: JavaFX or TornadoFX (Kotlin)
 
-The matrix in SKILL.md is the deciding tool. This document is the
-justification for the entries in that matrix when the user pushes back.
+`scripts/select_framework.py` and `templates/gui_framework_decision_tree.md`
+are the deciding tools. This document is the justification for the scores
+and recommendations when the user pushes back.
 
 ---
 
@@ -334,4 +408,3 @@ justification for the entries in that matrix when the user pushes back.
   --release` for the release-mode bundle. See `scripts/build_neutralino.ps1`.
 
 ---
-

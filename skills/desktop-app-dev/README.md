@@ -72,7 +72,7 @@ The Windows Python template also includes mouse helpers (`move_mouse`,
 ## Layout
 
 ```
-SKILL.md                          8-step workflow + When-NOT-to-use
+SKILL.md                          slim 8-step entry point + When-NOT-to-use
 README.md                         this file
 CHANGELOG.md                      what changed and when
 LICENSE                           MIT
@@ -81,21 +81,42 @@ pyproject.toml                    ruff + mypy config
 
 references/
   task_decomposition.md           Step 0+3 deep dive, worked examples
-  framework_matrix.md             detailed pros/cons per framework
-  distribution_playbook.md        packaging, signing, auto-update
+  ui_hard_requirements.md         UI-01..UI-18 mandatory UI rules + theme URLs
+  framework_selection_engine.md   scoring methodology for select_framework.py
+  framework_matrix.md             detailed pros/cons + quick decision/threading/resource tables
+  distribution_playbook.md        packaging/signing/auto-update + distribution-first/arch matrix
+  nativeaot_optimization.md       .NET NativeAOT deep dive
   win32_recipes.md                R1-R13 common Win32 patterns
+  accessibility_cross_platform.md UIA / MSAA / AppleScript / AT-SPI deep dive
+  restricted_network_playbook.md  offline builds, vendoring, local mirrors
+  media_acquisition_playbook.md   crawl / HLS / download / transcode / publish + queue
+  media_pipeline_clients.md       sidecar clients for every desktop language
 
 scripts/
-  sendinput_*       (11 scripts)  keyboard input; Python also has mouse
-  window_enum_*     (11 scripts)  drop-in window enumeration
+  sendinput_* + SendInput.java (12 files: 10 Windows languages + macOS/Linux analogues)  keyboard input; Python also has mouse
+  window_enum_* + WindowEnum.java (12 files: 9 Windows languages + Node C++ shim + macOS/Linux analogues)  drop-in window enumeration
   threading_*       (7 templates) background-work templates
+  select_framework.py             auto-select framework from requirements brief
   build_*.ps1       (14 helpers)  packaging helpers
+  build_dmg.sh / build_appimage.sh / build_deb.sh  macOS / Linux packaging helpers
   auto_update_*                   Velopack / Squirrel / WinSparkle / Sparkle / AppImageUpdate
-  vk_table.json                   canonical key table for keyboard templates
-  check_vk_tables.py              verifies Python template matches vk_table.json
-  sign_windows.ps1 / sign_macos.sh code signing helpers
   bootstrap_environment.ps1       detect/install toolchains (winget/pip)
+  find_python.ps1                 shared Python interpreter discovery
   toolchain_map.json              framework -> toolchain mapping
+  backup_source.ps1               timestamped source zip before packaging
+  vk_table.json                   canonical key table for keyboard templates
+  check_vk_tables.py              verifies all Windows templates match vk_table.json
+  media_*.py + hls_downloader.py  crawl, parse, chunk download, HLS
+  task_queue.py                   SQLite persistent task queue
+  captcha_solver.py etc.          CAPTCHA, browser session, ffmpeg, publisher
+  media_dependencies.py           check / install manager (default check-only)
+  media_pipeline_service.py       local HTTP sidecar for any desktop UI language
+  setup_media_dependencies.ps1    check / install runtime dependencies
+  sign_windows.ps1 / sign_macos.sh code signing helpers
+
+clients/
+  media_client.*                  ready-made wrappers: TS / C# / Go / Rust /
+                                  Kotlin / Swift / Java / C++
 
 templates/
   requirements_checklist.md       Step 0 fill-in
@@ -116,8 +137,8 @@ examples/                         minimal runnable projects
   nativeaot-winforms/             WinForms NativeAOT single-file EXE
   game-automation/                TLBB-style bot (window + input + thread)
 
-tests/                            smoke-test fixtures
-  fixtures/sample.md, sample_config.json, AppxManifest.xml
+tests/                            smoke tests + BOM regression + fixtures
+  test_no_bom.py, fixtures/sample.md, sample_config.json, AppxManifest.xml
 ```
 
 ## Quick recipe -- game automation bot
@@ -127,7 +148,8 @@ tests/                            smoke-test fixtures
 3. Decompose tasks with `templates/task_card.md`.
 4. Drop in `scripts/sendinput_<lang>` + `scripts/window_enum_<lang>`.
 5. Use `scripts/threading_<lang>` for the UI bridge.
-6. Package with `scripts/build_python.ps1` or `scripts/build_dotnet.ps1`.
+6. Package with `scripts/build_python.ps1` or `scripts/build_dotnet.ps1`;
+   pass `-BackupSource` to keep a timestamped source zip before the build.
 7. Run `scripts/auto_update_*.ps1` for the channel.
 8. Or just point at `examples/game-automation/` and start customizing.
 
@@ -135,7 +157,23 @@ tests/                            smoke-test fixtures
 
 Same as above, but the framework matrix row is usually C# WPF or PySide6.
 Add `templates/dpi_manifest.xml` to the project for crisp text on
-multi-monitor setups.
+multi-monitor setups, and apply `references/ui_hard_requirements.md`
+(UI-01..UI-18) before declaring the UI done.
+
+## Quick recipe -- media downloader / republisher
+
+1. Start from `references/media_acquisition_playbook.md`.
+2. Use `scripts/task_queue.py` for the persistent crawl / download /
+   transcode / publish queue.
+3. Drop in `scripts/media_session.py`, `media_parser.py`,
+   `media_downloader.py`, and `hls_downloader.py` for acquisition.
+4. Add `scripts/captcha_solver.py` and `scripts/browser_session.py` for
+   login / challenge handling.
+5. Transcode with `scripts/ffmpeg_transcoder.py`; publish through a
+   `scripts/platform_publisher.py` adapter.
+6. Install Playwright / ffmpeg / pycryptodome with
+   `scripts/setup_media_dependencies.ps1 -Install`, or call
+   `POST /deps/install` on the local sidecar from the UI.
 
 ## CI / continuous testing
 
@@ -144,10 +182,10 @@ push / PR:
 
 | Job               | OS             | Script                       |
 |-------------------|----------------|-------------------------------|
-| `lint`            | ubuntu-22.04   | `ruff check` + `ruff format` |
+| `lint`            | ubuntu-22.04   | `ruff check` + `ruff format --check` |
 | `test-windows`    | windows-latest | `tests/smoke_windows.ps1`   |
 | `test-macos`      | macos-latest   | `tests/smoke_macos.sh`      |
-| `test-linux`      | ubuntu-latest  | `tests/smoke_linux.sh`      |
+| `test-linux`      | ubuntu-22.04   | `tests/smoke_linux.sh`      |
 
 Each job installs PowerShell (via brew / apt) + Python 3.12, then runs
 the matching smoke test. On failure, logs are uploaded as artifacts
@@ -166,16 +204,26 @@ See `INDEX.md` for topic-based navigation (by use case / OS / framework
 - Every task card has explicit acceptance criteria and a verification method.
 - Every script has a `__main__` block that does no real hardware I/O.
 - Every shipped framework has a build path and threading guidance.
+- Build scripts never delete project source; `-BackupSource` creates a
+  timestamped zip before packaging.
+- Build helpers never auto-install missing CLIs; pass `-Install` to
+  install PyInstaller / tauri-cli / electron-builder / fyne / wails.
 - All SendInput implementations put foreground + timing in the helper, not
   in the caller.
+- Every GUI app passes `界面硬性要求` UI-01..UI-18 unless explicitly
+  waived in requirements.md.
 - Examples consume canonical `scripts/` templates directly or document
   standalone packaging paths; templates stay canonical, never duplicated.
+- SKILL.md stays a slim context-light entry point; deep details live in
+  `references/` and are read on demand.
 
 ## Linting
 
 ```powershell
+powershell -File tests/run_lint.ps1              # check-only; fails if ruff/mypy missing
+powershell -File tests/run_lint.ps1 -InstallDeps # install ruff/mypy, then run everything
 pip install ruff mypy
 ruff check scripts/ tests/ examples/
-ruff format --check scripts/
-mypy scripts/   # CI surfaces warnings; it does not fail the build
+ruff format --check scripts/ tests/ examples/
+mypy scripts/   # CI enforces mypy; it fails the build on type errors
 ```
