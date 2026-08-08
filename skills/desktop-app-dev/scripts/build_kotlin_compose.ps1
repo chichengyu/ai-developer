@@ -11,10 +11,16 @@ param(
     [switch] $BackupSource             # timestamped source zip before packaging
 )
 
-# Map Arch to a hint for the gradle property (Compose Desktop honours
-# org.gradle.jvmargs + nativeArch via the Kotlin Multiplatform plugin).
+# Compose Desktop packaging is host-bound; -Arch is a requested target hint.
 $nativeArch = @{ "x64" = "x64"; "arm64" = "aarch64"; "x86" = "x86" }[$Arch]
-Write-Host "==> Compose nativeArch: $nativeArch (Arch=$Arch)" -ForegroundColor Cyan
+$hostArch = $env:PROCESSOR_ARCHITECTURE
+if ($hostArch -eq "AMD64") { $hostArch = "x64" }
+elseif ($hostArch -eq "ARM64") { $hostArch = "arm64" }
+elseif ($hostArch -eq "X86") { $hostArch = "x86" }
+if ($Arch -ne $hostArch -and $hostArch) {
+    Write-Warning "Compose Desktop packaging is host-bound: requested -Arch $Arch differs from host $hostArch. The produced package will target the host architecture."
+}
+Write-Host "==> Compose nativeArch hint: $nativeArch (Arch=$Arch, host=$hostArch)" -ForegroundColor Cyan
 
 $ErrorActionPreference = "Stop"
 

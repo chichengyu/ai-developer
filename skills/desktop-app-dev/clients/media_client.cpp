@@ -18,12 +18,28 @@ public:
         return get("/tasks/" + std::to_string(id));
     }
 
+    std::string taskProgress(long id) const {
+        return get("/tasks/" + std::to_string(id) + "/progress");
+    }
+
+    std::string taskEvents(long id, int after = 0, double timeout = 0) const {
+        std::string query = "after=" + std::to_string(after);
+        if (timeout > 0) {
+            query += "&timeout=" + std::to_string(timeout);
+        }
+        return get("/tasks/" + std::to_string(id) + "/events?" + query);
+    }
+
     std::string depsProgress() const {
         return get("/deps/progress");
     }
 
     std::string depsStatus() const {
         return get("/deps/status");
+    }
+
+    std::string formats() const {
+        return get("/formats");
     }
 
     std::string installDeps() const {

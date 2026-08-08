@@ -82,7 +82,7 @@ requirements-dev.txt              pinned ruff / mypy / types-requests
 
 references/
   task_decomposition.md           Step 0+3 deep dive, worked examples
-  ui_hard_requirements.md         UI-01..UI-18 mandatory UI rules + theme URLs
+  ui_hard_requirements.md         UI-01..UI-19 mandatory UI rules + theme URLs
   minimal_change_requirements.md  CODE-01..CODE-05 minimal-change rules
   framework_selection_engine.md   scoring methodology for select_framework.py
   framework_matrix.md             detailed pros/cons + quick decision/threading/resource tables
@@ -92,6 +92,8 @@ references/
   win32_recipes.md                R1-R13 common Win32 patterns
   accessibility_cross_platform.md UIA / MSAA / AppleScript / AT-SPI deep dive
   restricted_network_playbook.md  offline builds, vendoring, local mirrors
+  heavy_desktop_playbook.md       layered architecture, virtualization, long jobs, startup/memory, stability
+  desktop_ui_playbook.md          tokens, theming, control catalog, keyboard, state, accessibility, UI performance
   media_acquisition_playbook.md   crawl / HLS / download / transcode / publish + queue
   web_data_pipeline_playbook.md   fingerprint browser / CAPTCHA / API collection / data processing
   media_pipeline_clients.md       sidecar clients for every desktop language
@@ -111,6 +113,8 @@ scripts/
   vk_table.json                   canonical key table for keyboard templates
   check_vk_tables.py              verifies all Windows templates match vk_table.json
   media_*.py + hls_downloader.py  crawl, parse, chunk download, HLS
+  media_formats.py                unified audio/video/image/subtitle/document/data/archive catalog
+  file_converter.py               all-format convert engine (ffmpeg + stdlib + batch)
   page_data_parser.py             deep page parse + CLI: metadata, embedded JSON, API endpoints
   api_client.py                   API specs from captures + rate-limited API fetching
   api_analyzer.py                 API manifest: auth headers, scores, data paths, pagination
@@ -119,6 +123,7 @@ scripts/
   scrape_guard.py                 rate limit / retry / robots / adaptive throttle
   task_queue.py                   SQLite persistent task queue
   captcha_solver.py etc.          CAPTCHA auto-detect/solve, browser session + network capture, ffmpeg, publisher
+  builtin_dependency_manager.py   app-local one-click runtime installer (UI-19)
   media_dependencies.py           check / install manager (default check-only)
   media_pipeline_service.py       local HTTP sidecar for any desktop UI language
   proxy_pool.py                   rotating proxy pool + named pool store
@@ -126,6 +131,7 @@ scripts/
   task_scheduler.py               interval / daily / cron recurring schedules
   notifier.py                     desktop / email / webhook notifications
   setup_media_dependencies.ps1    check / install runtime dependencies
+  heavy_desktop_verify.ps1        sample cold start / memory / CPU for a desktop app
   sign_windows.ps1 / sign_macos.sh code signing helpers
 
 clients/
@@ -140,6 +146,9 @@ templates/
   gui_framework_decision_tree.md  second-level tool picker
   release_checklist.md            release gate checklist
   security_checklist.md           security review checklist
+  heavy_desktop_acceptance.md     heavy desktop data/performance/stability acceptance fill-in
+  desktop_ui_tokens.json          one token source for color/type/spacing/dimensions
+  desktop_ui_checklist.md         deep desktop UI acceptance checklist
 
 examples/                         minimal runnable projects
   wpf-threading/                  C# WPF + threading_wpf.cs
@@ -150,6 +159,7 @@ examples/                         minimal runnable projects
   msix-packaging/                 WPF + Windows App SDK packaged as MSIX
   nativeaot-winforms/             WinForms NativeAOT single-file EXE
   game-automation/                TLBB-style bot (window + input + thread)
+  media-toolkit/                  live-progress downloader + all-format converter
 
 tests/                            smoke tests + BOM regression + fixtures
   test_no_bom.py, fixtures/sample.md, sample_config.json, AppxManifest.xml
@@ -173,7 +183,12 @@ tests/                            smoke tests + BOM regression + fixtures
 Same as above, but the framework matrix row is usually C# WPF or PySide6.
 Add `templates/dpi_manifest.xml` to the project for crisp text on
 multi-monitor setups, and apply `references/ui_hard_requirements.md`
-(UI-01..UI-18) before declaring the UI done.
+(UI-01..UI-19) before declaring the UI done. For data-heavy / multi-window
+apps, open `references/heavy_desktop_playbook.md`, copy
+`templates/heavy_desktop_acceptance.md`, and measure with
+`scripts/heavy_desktop_verify.ps1 -AppPath <exe> -SampleSeconds 60`.
+For deep desktop UI work, use `references/desktop_ui_playbook.md` with
+`templates/desktop_ui_tokens.json` and `templates/desktop_ui_checklist.md`.
 
 ## Quick recipe -- media downloader / republisher
 
@@ -184,11 +199,24 @@ multi-monitor setups, and apply `references/ui_hard_requirements.md`
    `media_downloader.py`, and `hls_downloader.py` for acquisition.
 4. Add `scripts/captcha_solver.py` and `scripts/browser_session.py` for
    login / challenge handling.
-5. Transcode with `scripts/ffmpeg_transcoder.py`; publish through a
-   `scripts/platform_publisher.py` adapter.
-6. Install Playwright / ffmpeg / pycryptodome with
-   `scripts/setup_media_dependencies.ps1 -Install`, or call
-   `POST /deps/install` on the local sidecar from the UI.
+5. Transcode or convert any file with `scripts/ffmpeg_transcoder.py` /
+   `scripts/file_converter.py`; query the full catalog from
+   `GET /formats` or `python scripts/media_formats.py --list`; publish
+   through a `scripts/platform_publisher.py` adapter.
+6. Ship a built-in dependency center (UI-19): the app shows one-click
+   `安装依赖`, calls `POST /deps/install` on the local sidecar, and
+   automatically downloads / installs / configures Playwright / ffmpeg /
+   pycryptodome into the app-local runtime with live bytes / speed / ETA.
+   The same flow works outside the sidecar with
+   `scripts/builtin_dependency_manager.py` or
+   `scripts/setup_media_dependencies.ps1 -Install`.
+7. Show live progress in the UI by polling `/tasks/<id>/progress` or using
+   the `taskProgress` / `taskEvents` client wrappers with long-poll
+   `timeout`; snapshots include total file size, downloaded/output bytes,
+   speed, ETA, and stage. Enqueue `kind: "batch-download"` for folder
+   downloads with aggregate progress, or `kind: "convert"` /
+   `kind: "batch-convert"` for single-file or folder conversion with the
+   same live progress contract.
 
 ## Quick recipe -- API data collection and processing
 
@@ -274,7 +302,7 @@ See `INDEX.md` for topic-based navigation (by use case / OS / framework
   install PyInstaller / tauri-cli / electron-builder / fyne / wails.
 - All SendInput implementations put foreground + timing in the helper, not
   in the caller.
-- Every GUI app passes `界面硬性要求` UI-01..UI-18 unless explicitly
+- Every GUI app passes `界面硬性要求` UI-01..UI-19 unless explicitly
   waived in requirements.md.
 - When touching existing code, apply the `代码开发硬性要求`
   CODE-01..CODE-05 minimal-change rules unless explicitly waived in

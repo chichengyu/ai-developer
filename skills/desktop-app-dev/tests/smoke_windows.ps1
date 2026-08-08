@@ -314,6 +314,57 @@ Run-Test "build_macos/linux size flags" {
     $mac -match 'EnableCompressionInSingleFile' -and $linux -match 'EnableCompressionInSingleFile' -and
     $linux -match '--noupx'
 }
+Run-Test "build_linux.ps1 honors -OutputDir for go/python" {
+    $text = Get-Content (Join-Path $scriptsDir "build_linux.ps1") -Raw
+    $text -match 'New-Item .*\$OutputDir' -and $text -match '--distpath' -and
+    $text -match '--workpath build' -and $text -match '--specpath build'
+}
+Run-Test "build_electron.ps1 honors -OutputDir" {
+    $text = Get-Content (Join-Path $scriptsDir "build_electron.ps1") -Raw
+    $text -match 'directories.output=\$OutputDir' -and $text -notmatch 'if \(Test-Path "dist"\)'
+}
+Run-Test "build_dotnet.ps1 Costura is not a silent no-op" {
+    $text = Get-Content (Join-Path $scriptsDir "build_dotnet.ps1") -Raw
+    $text -match 'if \(\$Costura\)' -and $text -match 'FodyWeavers.xml'
+}
+Run-Test "build_kotlin_compose.ps1 -Arch warns when host-bound" {
+    $text = Get-Content (Join-Path $scriptsDir "build_kotlin_compose.ps1") -Raw
+    $text -match 'host-bound' -and $text -match '\$hostArch' -and $text -match 'Write-Warning'
+}
+Run-Test "build_macos.ps1 avoids PowerShell-7-only Split-Path -LeafBase" {
+    $text = Get-Content (Join-Path $scriptsDir "build_macos.ps1") -Raw
+    $text -notmatch 'Split-Path \$Project -LeafBase' -and
+    $text -match 'GetFileNameWithoutExtension\(\$Project\)'
+}
+Run-Test "heavy_desktop_verify.ps1 self-test" {
+    powershell -ExecutionPolicy Bypass -File (Join-Path $scriptsDir "heavy_desktop_verify.ps1") -SelfTest 2>&1 | Out-Null
+    $LASTEXITCODE -eq 0
+}
+Run-Test "heavy desktop playbook + acceptance wiring" {
+    $skill = Get-Content (Join-Path $root "SKILL.md") -Raw
+    $readme = Get-Content (Join-Path $root "README.md") -Raw
+    $index = Get-Content (Join-Path $root "INDEX.md") -Raw
+    $playbook = Get-Content (Join-Path $root "references\heavy_desktop_playbook.md") -Raw
+    $template = Get-Content (Join-Path $root "templates\heavy_desktop_acceptance.md") -Raw
+    $playbook -match '100k-row' -and $playbook -match 'virtualized or paged' -and
+    $template -match 'release gate' -and
+    $skill -match 'references/heavy_desktop_playbook.md' -and
+    $readme -match 'heavy_desktop_verify.ps1' -and
+    $index -match 'heavy_desktop_verify.ps1'
+}
+Run-Test "desktop UI playbook + token/checklist wiring" {
+    $skill = Get-Content (Join-Path $root "SKILL.md") -Raw
+    $readme = Get-Content (Join-Path $root "README.md") -Raw
+    $index = Get-Content (Join-Path $root "INDEX.md") -Raw
+    $playbook = Get-Content (Join-Path $root "references\desktop_ui_playbook.md") -Raw
+    $tokens = Get-Content (Join-Path $root "templates\desktop_ui_tokens.json") -Raw | ConvertFrom-Json
+    $checklist = Get-Content (Join-Path $root "templates\desktop_ui_checklist.md") -Raw
+    $playbook -match 'theme registry' -and $tokens.theme.semantic.success -and
+    $checklist -match 'high-contrast' -and
+    $skill -match 'desktop_ui_tokens.json' -and
+    $readme -match 'desktop_ui_playbook.md' -and
+    $index -match 'desktop_ui_checklist.md'
+}
 
 # 4. test_arch_awareness.ps1
 Write-Host ""

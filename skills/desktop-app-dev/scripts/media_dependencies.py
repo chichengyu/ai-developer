@@ -20,10 +20,11 @@ import os
 import shutil
 import subprocess
 import sys
-import urllib.request
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+
+from media_downloader import download_file
 
 ProgressFn = Callable[[str, float | None, str], None]
 
@@ -156,31 +157,36 @@ def _install_ffmpeg_windows(
     progress: ProgressFn,
     url: str,
 ) -> None:
-    zip_path = runtime / "ffmpeg.zip"
+    cache_dir = runtime / "downloads"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = cache_dir / "ffmpeg.zip"
     extract_dir = runtime / "ffmpeg-src"
     bin_dir = runtime / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
 
-    request = urllib.request.Request(url, headers={"User-Agent": "MediaPipeline/1.0"})
-    with urllib.request.urlopen(request, timeout=60) as response, zip_path.open("wb") as out:
-        total = int(response.headers.get("Content-Length") or 0)
-        downloaded = 0
-        while True:
-            chunk = response.read(1024 * 1024)
-            if not chunk:
-                break
-            out.write(chunk)
-            downloaded += len(chunk)
-            percent = (downloaded / total) if total else None
-            progress("ffmpeg", percent, f"downloaded {downloaded:,} bytes")
+    if not zip_path.exists():
+        download_file(
+            url,
+            zip_path,
+            concurrency=4,
+            chunk_retries=3,
+            progress=lambda event: progress(
+                "ffmpeg",
+                event.percent,
+                (
+                    f"downloaded {event.downloaded:,}/{event.total or 0:,} bytes, "
+                    f"{event.speed_avg:.0f} B/s, ETA {int(event.eta_s or 0)}s"
+                ),
+            ),
+        )
+    else:
+        progress("ffmpeg", 1.0, f"using cached {zip_path.name}")
 
     with zipfile.ZipFile(zip_path) as archive:
         for member in archive.infolist():
             if not _zip_member_is_safe(member.filename):
                 raise RuntimeError(f"unsafe path in ffmpeg archive: {member.filename}")
         archive.extractall(extract_dir)
-    zip_path.unlink()
-
     copied: list[str] = []
     for exe in ("ffmpeg.exe", "ffprobe.exe"):
         source = next(extract_dir.rglob(exe), None)

@@ -36,6 +36,21 @@ public sealed class MediaClient
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
+    public async Task<JsonElement> TaskProgressAsync(long id)
+    {
+        var response = await _http.GetAsync($"/tasks/{id}/progress");
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    public async Task<JsonElement> TaskEventsAsync(long id, int after = 0, double timeout = 0)
+    {
+        var query = timeout > 0 ? $"?after={after}&timeout={timeout}" : $"?after={after}";
+        var response = await _http.GetAsync($"/tasks/{id}/events{query}");
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
     public async Task<JsonElement> DepsProgressAsync()
     {
         var response = await _http.GetAsync("/deps/progress");
@@ -46,6 +61,13 @@ public sealed class MediaClient
     public async Task<JsonElement> DepsStatusAsync()
     {
         var response = await _http.GetAsync("/deps/status");
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    public async Task<JsonElement> FormatsAsync()
+    {
+        var response = await _http.GetAsync("/formats");
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }

@@ -45,7 +45,7 @@ coding starts. Items marked **required** must be answered. Items marked
 
 ### 1.3 界面硬性要求（UI hard requirements）
 
-All UI-01..UI-18 items in `references/ui_hard_requirements.md` are
+All UI-01..UI-19 items in `references/ui_hard_requirements.md` are
 mandatory unless explicitly waived below. Fill in the waiver or the
 page / acceptance evidence for each item.
 
@@ -69,6 +69,7 @@ page / acceptance evidence for each item.
 | UI-16 | 滚动条明显且图标显示 | required | |
 | UI-17 | 表格提示与搜索栏分行 | required | |
 | UI-18 | 重型桌面端界面，禁止 Web 化 | required | |
+| UI-19 | 内置依赖中心：点击安装自动极速下载/安装/配置，无需用户介入 | required | |
 
 ### 1.4 代码开发硬性要求（minimal-change hard requirements）
 
@@ -161,5 +162,5 @@ requirement. The showstopper is verified first in Step 6.
 - [ ] User reviewed and accepted requirements
 - [ ] Showstopper is unambiguous
 - [ ] Every required field is filled
-- [ ] UI-01..UI-18 均已逐项填写或显式豁免（含原因与复审日期）
+- [ ] UI-01..UI-19 均已逐项填写或显式豁免（含原因与复审日期）
 - [ ] CODE-01..CODE-05 均已逐项填写或显式豁免（含原因与复审日期）

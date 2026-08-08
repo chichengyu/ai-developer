@@ -32,6 +32,17 @@ class MediaClient(
         return client.newCall(request).execute().body!!.string()
     }
 
+    fun taskProgress(id: Long): String {
+        val request = builder("/tasks/$id/progress").build()
+        return client.newCall(request).execute().body!!.string()
+    }
+
+    fun taskEvents(id: Long, after: Int = 0, timeout: Double = 0.0): String {
+        val query = if (timeout > 0) "after=$after&timeout=$timeout" else "after=$after"
+        val request = builder("/tasks/$id/events?$query").build()
+        return client.newCall(request).execute().body!!.string()
+    }
+
     fun depsProgress(): String {
         val request = builder("/deps/progress").build()
         return client.newCall(request).execute().body!!.string()
@@ -39,6 +50,11 @@ class MediaClient(
 
     fun depsStatus(): String {
         val request = builder("/deps/status").build()
+        return client.newCall(request).execute().body!!.string()
+    }
+
+    fun formats(): String {
+        val request = builder("/formats").build()
         return client.newCall(request).execute().body!!.string()
     }
 

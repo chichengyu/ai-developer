@@ -6,7 +6,7 @@ across Windows / macOS / Ubuntu.
 
 | Script                       | OS          | Purpose                                                  |
 |------------------------------|-------------|----------------------------------------------------------|
-| `smoke_windows.ps1`          | Windows     | all .ps1 parse + Python imports + fixtures + source backup + packaging optimization + platform flags + arch check + BOM/examples AST|
+| `smoke_windows.ps1`          | Windows     | all .ps1 parse + Python imports + fixtures + source backup + packaging optimization + platform flags + arch check + heavy-desktop/UI wiring + BOM/examples AST|
 | `test_no_bom.py`             | any         | BOM / U+FEFF regression scan across text files |
 | `test_threading_templates.py`| any         | every threading template has cancel/progress/error and a UI bridge |
 | `test_threading_concurrency.py`| any       | runtime checks for the shared bounded worker pool (retry, cancel, progress) |
@@ -28,7 +28,7 @@ cd tests
 .\smoke_windows.ps1
 ```
 
-Expected output: `Passed: 110   Failed: 0` (varies slightly as scripts
+Expected output: `Passed: 123   Failed: 0` (varies slightly as scripts
 are added).
 
 ### macOS

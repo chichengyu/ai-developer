@@ -134,6 +134,7 @@ class M3U8Segment:
     duration: float
     uri: str
     key_index: int | None = None
+    byterange: str | None = None
 
 
 @dataclass
@@ -143,6 +144,9 @@ class M3U8Playlist:
     segments: list[M3U8Segment] = field(default_factory=list)
     keys: list[M3U8Key] = field(default_factory=list)
     target_duration: float | None = None
+    init_uri: str | None = None
+    init_byterange: str | None = None
+    endlist: bool = False
 
 
 def _attr_value(line: str, key: str) -> str | None:
@@ -157,6 +161,8 @@ def parse_m3u8(text: str, base_url: str | None = None) -> M3U8Playlist:
     playlist = M3U8Playlist()
     current_variant: dict[str, str | int | None] = {}
     current_duration: float | None = None
+    current_byterange: str | None = None
+    byte_range_offsets: dict[str, int] = {}
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -166,6 +172,14 @@ def parse_m3u8(text: str, base_url: str | None = None) -> M3U8Playlist:
             value = line.split(":", 1)[1].strip()
             with suppress(ValueError):
                 playlist.target_duration = float(value)
+        elif line.startswith("#EXT-X-ENDLIST"):
+            playlist.endlist = True
+        elif line.startswith("#EXT-X-MAP:"):
+            uri = _attr_value(line, "URI")
+            byterange = _attr_value(line, "BYTERANGE")
+            if uri:
+                playlist.init_uri = normalize_url(uri, base_url)
+                playlist.init_byterange = byterange
         elif line.startswith("#EXT-X-STREAM-INF:"):
             playlist.is_master = True
             current_variant = {
@@ -173,6 +187,8 @@ def parse_m3u8(text: str, base_url: str | None = None) -> M3U8Playlist:
                 "resolution": _attr_value(line, "RESOLUTION"),
                 "codecs": _attr_value(line, "CODECS"),
             }
+        elif line.startswith("#EXT-X-BYTERANGE:"):
+            current_byterange = line.split(":", 1)[1].strip()
         elif line.startswith("#EXT-X-KEY:"):
             method = _attr_value(line, "METHOD") or "NONE"
             uri = _attr_value(line, "URI")
@@ -206,11 +222,25 @@ def parse_m3u8(text: str, base_url: str | None = None) -> M3U8Playlist:
                 key_index = None
                 if playlist.keys:
                     key_index = len(playlist.keys) - 1
+                byterange = None
+                if current_byterange:
+                    length_text, _, offset_text = current_byterange.partition("@")
+                    try:
+                        length = int(length_text, 0)
+                        offset = (
+                            int(offset_text, 0) if offset_text else byte_range_offsets.get(url, 0)
+                        )
+                        byte_range_offsets[url] = offset + length
+                        byterange = f"{length}@{offset}"
+                    except ValueError:
+                        byterange = None
+                    current_byterange = None
                 playlist.segments.append(
                     M3U8Segment(
                         duration=current_duration or 0.0,
                         uri=url,
                         key_index=key_index,
+                        byterange=byterange,
                     )
                 )
     return playlist

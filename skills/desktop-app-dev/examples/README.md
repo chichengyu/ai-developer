@@ -1,6 +1,6 @@
 # examples/
 
-Eight minimal runnable projects that demonstrate the skill's templates in
+Nine minimal runnable projects that demonstrate the skill's templates in
 real (non-toy) contexts. They either consume the canonical scripts in
 `../scripts/` by file link (`<Compile Include>` in .NET) or runtime
 `sys.path` injection (Python), or demonstrate a standalone packaging path.
@@ -15,6 +15,7 @@ real (non-toy) contexts. They either consume the canonical scripts in
 | `msix-packaging/`     | C# / WPF + Windows App SDK | MSIX packaging pipeline |
 | `nativeaot-winforms/` | C# / WinForms + NativeAOT | single-file NativeAOT EXE |
 | `game-automation/`    | Python 3.12  | TLBB-style bot: window + SendInput + threading |
+| `media-toolkit/`      | Python 3.12  | live-progress downloader + all-format converter |
 
 For independent batch jobs, swap in the matching
 `scripts/threading_pool_*` template (Python / C# / Tauri / Compose /
@@ -52,8 +53,11 @@ cd examples/tauri-threading && cargo tauri dev
 
 # Game automation (no extra deps)
 python examples/game-automation/app/app.py
+
+# Media toolkit (no extra deps; ffmpeg needed for media conversion)
+python examples/media-toolkit/app.py
 ```
 
-The tkinter and game-automation examples open a real window on your
-desktop. The others require the matching framework installed; their
-`README.md` documents the prereqs.
+The tkinter, game-automation, and media-toolkit examples open a real
+window on your desktop. The others require the matching framework
+installed; their `README.md` documents the prereqs.

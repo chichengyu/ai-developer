@@ -41,6 +41,23 @@ struct MediaClient {
         return data
     }
 
+    func taskProgress(id: Int) async throws -> Data {
+        let url = URL(string: "\(baseURL.absoluteString)/tasks/\(id)/progress")!
+        var request = URLRequest(url: url)
+        authorize(&request)
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return data
+    }
+
+    func taskEvents(id: Int, after: Int = 0, timeout: Double = 0) async throws -> Data {
+        let query = timeout > 0 ? "after=\(after)&timeout=\(timeout)" : "after=\(after)"
+        let url = URL(string: "\(baseURL.absoluteString)/tasks/\(id)/events?\(query)")!
+        var request = URLRequest(url: url)
+        authorize(&request)
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return data
+    }
+
     func depsProgress() async throws -> Data {
         let url = baseURL.appendingPathComponent("deps/progress")
         var request = URLRequest(url: url)
@@ -51,6 +68,14 @@ struct MediaClient {
 
     func depsStatus() async throws -> Data {
         let url = baseURL.appendingPathComponent("deps/status")
+        var request = URLRequest(url: url)
+        authorize(&request)
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return data
+    }
+
+    func formats() async throws -> Data {
+        let url = baseURL.appendingPathComponent("formats")
         var request = URLRequest(url: url)
         authorize(&request)
         let (data, _) = try await URLSession.shared.data(for: request)

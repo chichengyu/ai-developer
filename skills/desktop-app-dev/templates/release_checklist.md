@@ -39,14 +39,17 @@ issue and tick each one.
 
 - [ ] Every task in `tasks.md` from Step 3 has its acceptance test passing.
 - [ ] The showstopper from Step 0 is verified one more time before sign-off.
-- [ ] `界面硬性要求` UI-01..UI-18 from
+- [ ] `界面硬性要求` UI-01..UI-19 from
   `references/ui_hard_requirements.md` pass on the target OS.
 - [ ] `代码开发硬性要求` CODE-01..CODE-05 from `SKILL.md` pass;
   working original logic preserved unless a behavior change is recorded
   in requirements.md.
 - [ ] Settings persistence survives an uninstall + reinstall cycle.
-- [ ] Media runtime one-click install verified on a clean machine
-  (Playwright + Chromium + ffmpeg / ffprobe + pycryptodome).
+- [ ] Built-in dependency center (UI-19) verified on a clean machine:
+  click `安装依赖`, the app automatically downloads / installs /
+  configures Playwright + Chromium + ffmpeg / ffprobe + pycryptodome
+  into its app-local runtime with live bytes / speed / ETA, no manual
+  input, and the app restarts with the runtime available.
 - [ ] Auto-update: install v1.0.0, then publish v1.0.1 to the feed, the
   app must detect and offer the update without manual intervention.
 - [ ] Clean uninstall: no orphan files in `%APPDATA%` / `~/Library` /

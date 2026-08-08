@@ -30,7 +30,16 @@ tkinter GUI that wraps `send_key` + `press_combo` + `WindowFinder`.
 Form, table, report, dashboard. Pick a framework from
 `references/framework_matrix.md`. After picking the framework, see
 "By framework" below. Apply `references/ui_hard_requirements.md`
-(UI-01..UI-18) before declaring the UI done.
+(UI-01..UI-19) before declaring the UI done.
+
+### Heavy desktop / data-dense app (Category B/C/D)
+
+Data-heavy, multi-window, long-lived, or enterprise apps start with
+`references/heavy_desktop_playbook.md`: layered architecture + DI,
+virtualization or paging, persistent long-running jobs, startup/memory
+profiling, stability, and 100k-row acceptance. Copy
+`templates/heavy_desktop_acceptance.md` into requirements.md and measure
+with `scripts/heavy_desktop_verify.ps1 -AppPath <exe> -SampleSeconds 60`.
 
 ### System / DevOps tool (Category C)
 
@@ -51,9 +60,11 @@ Cross-platform deep dive: `references/accessibility_cross_platform.md`.
 ### Multimedia / GPU (Category D)
 
 Step 3 variations in `SKILL.md` mention "GPU device enumeration" + "shader /
-asset pipeline"; framework matrix lists Vulkan / OpenGL candidates. No
-template files ship with the skill for this category -- it is too
-domain-specific.
+asset pipeline"; framework matrix lists Vulkan / OpenGL candidates. For
+media download / transcode / conversion work, the media pipeline ships
+ready templates: `media_session.py`, `media_downloader.py`,
+`hls_downloader.py`, `ffmpeg_transcoder.py`, `media_formats.py`, and
+`file_converter.py` (see "I need a media downloader / republisher").
 
 ---
 
@@ -74,7 +85,7 @@ domain-specific.
 - Packaging: `build_python.ps1`, `build_dotnet.ps1`, `build_electron.ps1`,
   `build_qt.ps1`, plus MSI / NSIS / MSIX / Velopack / Squirrel / WinSparkle.
 - DPI: `templates/dpi_manifest.xml` (Per-monitor V2).
-- Examples: `examples/{wpf,winui3,tkinter,pyside6,tauri,msix-packaging,nativeaot-winforms,game-automation}/`.
+- Examples: `examples/{wpf,winui3,tkinter,pyside6,tauri,msix-packaging,nativeaot-winforms,game-automation,media-toolkit}/`.
 
 ### macOS (11 Big Sur+, Apple Silicon preferred)
 
@@ -157,9 +168,26 @@ command.
 
 ### I need UI / theme consistency
 
-Open `references/ui_hard_requirements.md` -- canonical UI-01..UI-18
+Open `references/ui_hard_requirements.md` -- canonical UI-01..UI-19
 checklist, Codex-like default palette, semantic colors, theme library
 URLs, settings persistence, log center, and auto-refresh rules.
+
+### I need a heavy desktop / data-dense app
+
+Open `references/heavy_desktop_playbook.md` for layered architecture,
+dependency injection, grid virtualization / paging, long-running job
+persistence, startup and memory profiling, single instance, crash
+reporting, and plugin isolation. Copy
+`templates/heavy_desktop_acceptance.md` into requirements.md and run
+`scripts/heavy_desktop_verify.ps1` in Step 6.
+
+### I need deep desktop UI / theming / controls
+
+Open `references/desktop_ui_playbook.md` for design tokens, runtime theme
+switching, control catalog, data grids, keyboard interaction, state
+management, accessibility, and UI performance. Copy
+`templates/desktop_ui_tokens.json` as the token source and close with
+`templates/desktop_ui_checklist.md`.
 
 ### I need to modify existing code safely
 
@@ -177,12 +205,24 @@ page/API/data parse + CLI), `scrape_guard.py` (rate limit / retry /
 robots / adaptive throttle), `media_downloader.py`, `hls_downloader.py`,
 `captcha_solver.py` (auto-detect / auto-solve), `browser_session.py`
 (fingerprint + runtime network capture), `ffmpeg_transcoder.py`, and
-`platform_publisher.py`.
+`platform_publisher.py`. The unified format catalog lives in
+`media_formats.py`; `file_converter.py` converts single files or folders
+across video / audio / image / subtitle / document / data / archive
+categories with aggregate byte-based progress.
 For any other desktop UI language, run `scripts/media_pipeline_service.py`
 and use `clients/` wrappers or `references/media_pipeline_clients.md`
 to call it over HTTP.
-Install the runtime with `scripts/setup_media_dependencies.ps1 -Install`
-or `POST /deps/install`.
+Install the runtime with the app's built-in dependency center (UI-19):
+the user clicks `安装依赖`, and the app calls `POST /deps/install` or
+uses `scripts/builtin_dependency_manager.py` to download / install /
+configure app-local binaries automatically. The CLI equivalent is
+`scripts/setup_media_dependencies.ps1 -Install`.
+Live UI progress comes from `GET /tasks/<id>/progress` and
+`GET /tasks/<id>/events?after=N&timeout=0..30` (long-poll); snapshots
+include total file size, downloaded/output bytes, percent, speed, ETA, and
+chunk/merge counts. `GET /formats` returns the full target catalog;
+enqueue `kind: "convert"` / `kind: "batch-convert"` for single-file or
+folder conversion.
 
 ### I need to collect API data / process it by user rules
 
@@ -338,6 +378,24 @@ I want a runnable demo I can adapt
 I want background work without freezing the UI
     --> references/threading_playbook.md
         (30 scripts/threading_* files: single-worker + pool templates)
+
+I want a heavy desktop / data-dense app
+    --> references/heavy_desktop_playbook.md
+        + templates/heavy_desktop_acceptance.md
+        + scripts/heavy_desktop_verify.ps1
+
+I want deep desktop UI theming / controls / accessibility
+    --> references/desktop_ui_playbook.md
+        + templates/desktop_ui_tokens.json
+        + templates/desktop_ui_checklist.md
+
+I want to convert audio / video / images / documents / archives
+    --> scripts/file_converter.py + scripts/media_formats.py
+        (or enqueue convert / batch-convert tasks through the sidecar)
+
+I want app-local one-click dependency install
+    --> scripts/builtin_dependency_manager.py + UI-19
+        (user clicks install; app downloads/configures into its runtime)
 
 I want to package as EXE / .app / .AppImage
     --> scripts/build_<your-target>.ps1 (or .sh)

@@ -58,10 +58,13 @@ class MediaProbe:
     content_type: str | None
     filename: str | None
     headers: dict[str, str]
+    content_range: str | None = None
 
     @property
     def supports_resume(self) -> bool:
-        return self.total_size is not None and self.accept_ranges
+        return self.total_size is not None and (
+            self.accept_ranges or self.content_range is not None
+        )
 
 
 class MediaSession:
@@ -156,6 +159,11 @@ class MediaSession:
         content_length = response.headers.get("Content-Length", "")
         total_size = int(content_length) if content_length.isdigit() else None
         accept_ranges = (response.headers.get("Accept-Ranges") or "").lower() == "bytes"
+        content_range = response.headers.get("Content-Range")
+        if total_size is None and content_range:
+            match = re.match(r"bytes\s+\d+-\d+/(\d+)", content_range)
+            if match:
+                total_size = int(match.group(1))
         return MediaProbe(
             url=url,
             status=int(getattr(response, "status", response.code)),
@@ -164,6 +172,7 @@ class MediaSession:
             content_type=response.headers.get("Content-Type"),
             filename=guess_filename(url, response.headers.get("Content-Disposition")),
             headers=dict(response.headers.items()),
+            content_range=content_range,
         )
 
     def get_bytes(

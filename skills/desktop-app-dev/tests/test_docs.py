@@ -40,7 +40,7 @@ def main() -> int:
         sum(1 for line in skill if line == "## 界面硬性要求（UI hard requirements）") == 1,
         "SKILL.md must contain exactly one 界面硬性要求 heading",
     )
-    ui_ids = [f"UI-{i:02d}" for i in range(1, 19)]
+    ui_ids = [f"UI-{i:02d}" for i in range(1, 20)]
     skill_text = "\n".join(skill)
     for uid in ui_ids:
         check(f"| {uid} |" in skill_text, f"SKILL.md missing {uid} table row")
@@ -111,6 +111,9 @@ def main() -> int:
             "语义",
             "桌面端",
             "Web 化",
+            "内置依赖",
+            "virtualized or paged",
+            "100k-row",
         ]
         for term in required_ui_terms:
             check(term in ui_text, f"ui_hard_requirements.md missing required term: {term}")
@@ -141,7 +144,7 @@ def main() -> int:
     for uid in ui_ids:
         check(f"| {uid} |" in req_template, f"requirements_checklist.md missing {uid} row")
     release_text = (ROOT / "templates" / "release_checklist.md").read_text(encoding="utf-8")
-    check("UI-01..UI-18" in release_text, "release_checklist.md missing UI-01..UI-18 release gate")
+    check("UI-01..UI-19" in release_text, "release_checklist.md missing UI-01..UI-19 release gate")
     check(
         "single distributable artifact" in release_text and "Idle memory" in release_text,
         "release_checklist.md missing single-file / idle-memory release gates",
@@ -208,13 +211,118 @@ def main() -> int:
     check("usesystem CMake" not in index_text, "INDEX.md has usesystem CMake typo")
 
     reference_files = sorted(p.name for p in (ROOT / "references").glob("*.md"))
-    check(len(reference_files) == 14, f"references count = {len(reference_files)}, expected 14")
+    check(len(reference_files) == 16, f"references count = {len(reference_files)}, expected 16")
     for ref_name in reference_files:
         check(
             f"references/{ref_name}" in skill_text,
             f"SKILL.md missing reference link {ref_name}",
         )
         check(ref_name in readme_text, f"README.md missing reference {ref_name}")
+    heavy_ref = ROOT / "references" / "heavy_desktop_playbook.md"
+    check(heavy_ref.exists(), "missing references/heavy_desktop_playbook.md")
+    if heavy_ref.exists():
+        heavy_text = heavy_ref.read_text(encoding="utf-8")
+        for term in [
+            "layered architecture",
+            "dependency injection",
+            "composition root",
+            "virtualized or paged",
+            "100k-row",
+            "QAbstractItemModel",
+            "canFetchMore",
+            "VirtualizingStackPanel",
+            "ItemsRepeater",
+            "IncrementalLoadingCollection",
+            "DataGridView.VirtualMode",
+            "single instance",
+            "crash dump",
+            "EventPipe",
+            "dotnet-counters",
+            "py-spy",
+            "tracemalloc",
+            "heavy_desktop_verify.ps1",
+        ]:
+            check(
+                term.lower() in heavy_text.lower(),
+                f"heavy_desktop_playbook.md missing required term: {term}",
+            )
+    ui_playbook_ref = ROOT / "references" / "desktop_ui_playbook.md"
+    check(ui_playbook_ref.exists(), "missing references/desktop_ui_playbook.md")
+    if ui_playbook_ref.exists():
+        ui_playbook_text = ui_playbook_ref.read_text(encoding="utf-8")
+        for term in [
+            "design tokens",
+            "theme registry",
+            "semantic colors",
+            "control catalog",
+            "keyboard",
+            "state management",
+            "accessibility",
+            "virtualized or paged",
+            "desktop_ui_tokens.json",
+            "desktop_ui_checklist.md",
+        ]:
+            check(
+                term.lower() in ui_playbook_text.lower(),
+                f"desktop_ui_playbook.md missing required term: {term}",
+            )
+    heavy_script = ROOT / "scripts" / "heavy_desktop_verify.ps1"
+    check(heavy_script.exists(), "missing scripts/heavy_desktop_verify.ps1")
+    if heavy_script.exists():
+        heavy_script_text = heavy_script.read_text(encoding="utf-8")
+        check("SelfTest" in heavy_script_text, "heavy_desktop_verify.ps1 missing -SelfTest")
+        check("ConvertTo-Json" in heavy_script_text, "heavy_desktop_verify.ps1 missing JSON output")
+        check(
+            "AvgWorkingSetMB" in heavy_script_text,
+            "heavy_desktop_verify.ps1 missing memory report field",
+        )
+    heavy_acceptance = ROOT / "templates" / "heavy_desktop_acceptance.md"
+    check(heavy_acceptance.exists(), "missing templates/heavy_desktop_acceptance.md")
+    if heavy_acceptance.exists():
+        heavy_acceptance_text = heavy_acceptance.read_text(encoding="utf-8")
+        for term in ["100k-row", "single instance", "release gate", "composition root"]:
+            check(
+                term.lower() in heavy_acceptance_text.lower(),
+                f"heavy_desktop_acceptance.md missing required term: {term}",
+            )
+    ui_tokens = ROOT / "templates" / "desktop_ui_tokens.json"
+    check(ui_tokens.exists(), "missing templates/desktop_ui_tokens.json")
+    if ui_tokens.exists():
+        token_data = json.loads(ui_tokens.read_text(encoding="utf-8"))
+        check(
+            "semantic" in token_data.get("theme", {})
+            and set(token_data["theme"]["semantic"]) == {"success", "warning", "danger", "info"},
+            "desktop_ui_tokens.json semantic colors missing",
+        )
+        check(
+            "light" in token_data.get("color", {})
+            and "dark" in token_data["color"]
+            and "high-contrast" in token_data["color"],
+            "desktop_ui_tokens.json missing light/dark/high-contrast modes",
+        )
+    ui_checklist = ROOT / "templates" / "desktop_ui_checklist.md"
+    check(ui_checklist.exists(), "missing templates/desktop_ui_checklist.md")
+    if ui_checklist.exists():
+        ui_checklist_text = ui_checklist.read_text(encoding="utf-8")
+        check(
+            "high-contrast" in ui_checklist_text.lower()
+            and "virtualized or paged" in ui_checklist_text.lower(),
+            "desktop_ui_checklist.md missing high-contrast / virtualization gates",
+        )
+    for doc_name, doc_text in (
+        ("SKILL.md", skill_text),
+        ("README.md", readme_text),
+        ("INDEX.md", index_text),
+    ):
+        for asset in (
+            "references/heavy_desktop_playbook.md",
+            "references/desktop_ui_playbook.md",
+            "heavy_desktop_verify.ps1",
+            "heavy_desktop_acceptance.md",
+            "desktop_ui_tokens.json",
+            "desktop_ui_checklist.md",
+        ):
+            check(asset in doc_text, f"{doc_name} missing heavy/UI asset link: {asset}")
     for framework_row in (
         "Rust + Slint",
         "Rust + egui",
@@ -324,6 +432,7 @@ def main() -> int:
         "task_queue.py",
         "ffmpeg_transcoder.py",
         "platform_publisher.py",
+        "builtin_dependency_manager.py",
         "media_dependencies.py",
         "media_pipeline_service.py",
         "setup_media_dependencies.ps1",
@@ -477,7 +586,7 @@ def main() -> int:
     threading = list((ROOT / "scripts").glob("threading_*"))
     sendinput = list((ROOT / "scripts").glob("sendinput_*"))
     window_enum = list((ROOT / "scripts").glob("window_enum*"))
-    check(len(examples) == 8, f"examples count = {len(examples)}, expected 8")
+    check(len(examples) == 9, f"examples count = {len(examples)}, expected 9")
     check(len(build_ps1) == 14, f"build_*.ps1 count = {len(build_ps1)}, expected 14")
     check(len(threading) == 30, f"threading_* count = {len(threading)}, expected 30")
     check(len(sendinput) == 11, f"sendinput_* count = {len(sendinput)}, expected 11")

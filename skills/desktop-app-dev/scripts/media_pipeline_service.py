@@ -10,9 +10,12 @@ Endpoints:
   GET  /deps/status
   GET  /deps/progress
   POST /deps/install
+  GET  /formats                unified format catalog
   POST /tasks                 enqueue {kind, payload, dedupe_key, priority}
   GET  /tasks                 list with status/limit/offset/search
   GET  /tasks/<id>            one task
+  GET  /tasks/<id>/progress   rich progress snapshot
+  GET  /tasks/<id>/events?after=N&timeout=0..30
   POST /tasks/<id>/pause|resume|cancel
   POST /workers/start|stop
   GET/POST/DELETE /proxy-pools, GET /proxy-pools/<name>
@@ -43,8 +46,10 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from account_manager import AccountManager
+from ffmpeg_transcoder import probe_media
 from media_dependencies import check_status, install_dependencies
-from media_downloader import download_file, safe_output_name
+from media_downloader import download_batch, download_file, safe_output_name
+from media_formats import catalog_payload
 from notifier import Notifier
 from proxy_pool import ProxyPool, ProxyPoolStore
 from task_queue import TaskQueue, TaskRecord
@@ -92,7 +97,7 @@ class MediaPipelineService:
         self._stop = threading.Event()
         self._install_lock = threading.Lock()
         self._progress_lock = threading.Lock()
-        self._events_lock = threading.Lock()
+        self._events_lock = threading.Condition()
         self._task_events: dict[int, list[dict[str, Any]]] = {}
         self._installing = False
         self._install_progress: dict[str, Any] = {
@@ -207,12 +212,17 @@ class MediaPipelineService:
             output = payload.get("output")
 
             def progress(stage: str, percent: float, message: str) -> None:
-                self.queue.update_progress(
+                self._publish_progress(
                     task.id,
-                    float(percent or 0),
-                    stage=stage,
+                    stage,
+                    percent,
+                    {
+                        "stage": stage,
+                        "percent": percent,
+                        "message": message,
+                    },
+                    message=message,
                 )
-                self.record_task_event(task.id, stage, float(percent or 0), message)
 
             summary = WebDataPipeline(config, output=output).run(progress=progress)
             return json.dumps(summary, ensure_ascii=False)
@@ -292,6 +302,26 @@ class MediaPipelineService:
                 download_kwargs["chunk_size"] = int(payload["chunk_size"])
             if payload.get("concurrency") is not None:
                 download_kwargs["concurrency"] = int(payload["concurrency"])
+            if payload.get("chunk_retries") is not None:
+                download_kwargs["chunk_retries"] = int(payload["chunk_retries"])
+            if payload.get("adaptive_concurrency") is not None:
+                download_kwargs["adaptive_concurrency"] = bool(payload["adaptive_concurrency"])
+            if payload.get("slow_shard_switch") is not None:
+                download_kwargs["slow_shard_switch"] = bool(payload["slow_shard_switch"])
+            if payload.get("slow_after_seconds") is not None:
+                download_kwargs["slow_after_seconds"] = float(payload["slow_after_seconds"])
+            if payload.get("slow_idle_seconds") is not None:
+                download_kwargs["slow_idle_seconds"] = float(payload["slow_idle_seconds"])
+            if payload.get("slow_restart_limit") is not None:
+                download_kwargs["slow_restart_limit"] = int(payload["slow_restart_limit"])
+            if payload.get("tune_interval") is not None:
+                download_kwargs["tune_interval"] = float(payload["tune_interval"])
+            if payload.get("auto_chunk_sizing") is not None:
+                download_kwargs["auto_chunk_sizing"] = bool(payload["auto_chunk_sizing"])
+            if payload.get("max_speed_bytes_per_sec") is not None:
+                download_kwargs["max_speed_bytes_per_sec"] = float(
+                    payload["max_speed_bytes_per_sec"]
+                )
             download_result = download_file(
                 payload["url"],
                 payload["dest"],
@@ -299,13 +329,62 @@ class MediaPipelineService:
                 task_id=task.id,
                 headers=payload.get("headers"),
                 **download_kwargs,
-                progress=lambda progress: self.queue.update_progress(
+                progress=lambda progress: self._publish_progress(
                     task.id,
-                    progress.percent or 0,
-                    stage=progress.stage,
+                    progress.stage,
+                    progress.percent,
+                    self._download_meta(progress),
                 ),
             )
             return str(download_result.path)
+        if task.kind == "batch-download":
+            session = self._build_session(
+                payload,
+                account=account,
+                proxy_pool_store=self.proxy_pools,
+            )
+            batch_kwargs: dict[str, Any] = {
+                key: payload[key]
+                for key in (
+                    "chunk_size",
+                    "concurrency",
+                    "chunk_retries",
+                    "resume",
+                    "auto_chunk_sizing",
+                    "adaptive_concurrency",
+                    "slow_shard_switch",
+                    "slow_after_seconds",
+                    "slow_idle_seconds",
+                    "slow_restart_limit",
+                    "tune_interval",
+                    "max_speed_bytes_per_sec",
+                )
+                if payload.get(key) is not None
+            }
+            batch_result = download_batch(
+                payload["urls"],
+                payload["dest_dir"],
+                session=session,
+                task_id=task.id,
+                headers=payload.get("headers"),
+                progress=lambda progress: self._publish_progress(
+                    task.id,
+                    progress.stage,
+                    progress.percent,
+                    self._batch_download_meta(progress),
+                ),
+                **batch_kwargs,
+            )
+            return json.dumps(
+                {
+                    "paths": [str(path) for path in batch_result.paths],
+                    "total_bytes": batch_result.total_bytes,
+                    "downloaded_bytes": batch_result.downloaded_bytes,
+                    "elapsed_s": batch_result.elapsed_s,
+                    "average_speed": batch_result.average_speed,
+                },
+                ensure_ascii=False,
+            )
         if task.kind == "hls":
             from hls_downloader import download_hls
 
@@ -321,31 +400,100 @@ class MediaPipelineService:
                 session=session,
                 concurrency=int(payload.get("concurrency", 4)),
                 quality=payload.get("quality"),
+                segment_retries=int(payload.get("segment_retries", 3)),
+                merge_fallback=bool(payload.get("merge_fallback", True)),
+                keep_segments=bool(payload.get("keep_segments", True)),
                 task_id=task.id,
                 ffmpeg_path=self._runtime_bin("ffmpeg"),
-                progress=lambda progress: self.queue.update_progress(
+                progress=lambda progress: self._publish_progress(
                     task.id,
+                    progress.stage,
                     progress.percent,
-                    stage="segments",
+                    self._hls_meta(progress),
                 ),
             )
             return str(hls_result.output_path or hls_result.output_dir)
         if task.kind == "transcode":
             from ffmpeg_transcoder import transcode_file
 
+            transcode_kwargs: dict[str, Any] = {}
+            for key in (
+                "profile",
+                "video_codec",
+                "video_preset",
+                "crf",
+                "audio_codec",
+                "extra_args",
+                "audio_bitrate",
+                "video_bitrate",
+                "resolution",
+                "fps",
+                "audio_channels",
+                "audio_sample_rate",
+                "faststart",
+                "audio_only",
+                "start_time",
+                "duration",
+                "threads",
+            ):
+                if payload.get(key) is not None:
+                    transcode_kwargs[key] = payload[key]
+            if payload.get("smart_copy") is not None:
+                transcode_kwargs["smart_copy"] = bool(payload["smart_copy"])
+            if payload.get("hardware") is not None:
+                transcode_kwargs["hardware"] = payload["hardware"]
             transcode_result = transcode_file(
                 payload["src"],
                 payload["dst"],
                 task_id=task.id,
                 ffmpeg_path=self._runtime_bin("ffmpeg"),
                 ffprobe_path=self._runtime_bin("ffprobe"),
-                progress=lambda progress: self.queue.update_progress(
+                progress=lambda progress: self._publish_progress(
                     task.id,
-                    progress.percent or 0,
-                    stage="transcode",
+                    progress.stage,
+                    progress.percent,
+                    self._transcode_meta(progress),
                 ),
+                **transcode_kwargs,
             )
             return str(transcode_result)
+        if task.kind == "convert":
+            from file_converter import convert_file
+
+            convert_result = convert_file(
+                payload["src"],
+                payload["dst"],
+                profile=payload.get("profile"),
+                task_id=task.id,
+                ffmpeg_path=self._runtime_bin("ffmpeg"),
+                ffprobe_path=self._runtime_bin("ffprobe"),
+                extra_args=payload.get("extra_args"),
+                progress=lambda progress: self._publish_progress(
+                    task.id,
+                    progress.stage,
+                    progress.percent,
+                    self._convert_meta(progress),
+                ),
+            )
+            return str(convert_result.path)
+        if task.kind == "batch-convert":
+            from file_converter import convert_many
+
+            summary = convert_many(
+                payload["srcs"],
+                output_dir=payload["output_dir"],
+                target_ext=payload["target"],
+                task_id=task.id,
+                ffmpeg_path=self._runtime_bin("ffmpeg"),
+                ffprobe_path=self._runtime_bin("ffprobe"),
+                progress=lambda progress: self._publish_progress(
+                    task.id,
+                    progress.stage,
+                    progress.percent,
+                    self._batch_convert_meta(progress),
+                ),
+            )
+            return json.dumps(summary, ensure_ascii=False)
         raise NotImplementedError(f"publisher adapter for kind={task.kind} is not implemented")
 
     def _runtime_bin(self, name: str) -> str:
@@ -355,6 +503,60 @@ class MediaPipelineService:
                 if candidate.exists():
                     return str(candidate)
         return name
+
+    @staticmethod
+    def _download_meta(progress: Any) -> dict[str, Any]:
+        return asdict(progress)
+
+    @staticmethod
+    def _batch_download_meta(progress: Any) -> dict[str, Any]:
+        return asdict(progress)
+
+    @staticmethod
+    def _hls_meta(progress: Any) -> dict[str, Any]:
+        return asdict(progress)
+
+    @staticmethod
+    def _transcode_meta(progress: Any) -> dict[str, Any]:
+        return asdict(progress)
+
+    @staticmethod
+    def _convert_meta(progress: Any) -> dict[str, Any]:
+        return asdict(progress)
+
+    @staticmethod
+    def _batch_convert_meta(progress: Any) -> dict[str, Any]:
+        return asdict(progress)
+
+    def _publish_progress(
+        self,
+        task_id: int,
+        stage: str,
+        percent: float | None,
+        meta: dict[str, Any] | None = None,
+        message: str | None = None,
+    ) -> None:
+        normalized = float(percent or 0)
+        self.queue.update_progress(
+            task_id,
+            normalized,
+            stage=stage,
+            progress_meta=meta,
+        )
+        self.record_task_event(
+            task_id,
+            stage,
+            normalized,
+            message or stage,
+            meta=meta,
+        )
+
+    def probe_media_file(self, path: str) -> dict[str, Any] | None:
+        """Probe a local media file with ffprobe and return serializable info."""
+        info = probe_media(path, ffprobe_path=self._runtime_bin("ffprobe"))
+        if info is None:
+            return None
+        return asdict(info)
 
     @staticmethod
     def _build_session(
@@ -507,6 +709,7 @@ class MediaPipelineService:
         stage: str,
         percent: float,
         message: str,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         with self._events_lock:
             events = self._task_events.setdefault(task_id, [])
@@ -515,15 +718,32 @@ class MediaPipelineService:
                     "stage": stage,
                     "percent": percent,
                     "message": message,
+                    "meta": meta,
                     "at": time.time(),
                 }
             )
             if len(events) > 200:
                 self._task_events[task_id] = events[-200:]
+            self._events_lock.notify_all()
 
     def task_events(self, task_id: int, after: int = 0) -> list[dict[str, Any]]:
         with self._events_lock:
             events = self._task_events.get(task_id, [])
+            return list(events[max(0, after) :])
+
+    def wait_for_task_events(
+        self,
+        task_id: int,
+        after: int = 0,
+        timeout_s: float = 0.0,
+    ) -> list[dict[str, Any]]:
+        with self._events_lock:
+            events = self._task_events.get(task_id, [])
+            if len(events) > after:
+                return list(events[max(0, after) :])
+            if timeout_s > 0:
+                self._events_lock.wait(min(float(timeout_s), 30.0))
+                events = self._task_events.get(task_id, [])
             return list(events[max(0, after) :])
 
     def close(self) -> None:
@@ -585,6 +805,9 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                 return
             if path == "/deps/progress":
                 self._send_json(200, service.install_progress)
+                return
+            if path == "/formats":
+                self._send_json(200, catalog_payload())
                 return
             if path == "/accounts":
                 self._send_json(200, {"items": service.accounts.list()})
@@ -653,7 +876,16 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                             after = max(0, int(after_text))
                         except ValueError:
                             after = 0
-                        events = service.task_events(task_id, after)
+                        timeout_text = query.get("timeout", ["0"])[0] or "0"
+                        try:
+                            timeout_s = min(max(float(timeout_text), 0.0), 30.0)
+                        except ValueError:
+                            timeout_s = 0.0
+                        events = service.wait_for_task_events(
+                            task_id,
+                            after,
+                            timeout_s,
+                        )
                         self._send_json(200, {"events": events, "next": after + len(events)})
                         return
                     if parts[3] == "progress":
@@ -667,6 +899,7 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                                     "task_id": task.id,
                                     "progress": task.progress,
                                     "stage": task.stage,
+                                    "progress_meta": task.progress_meta,
                                     "events": service.task_events(task_id),
                                 },
                             )
@@ -695,6 +928,17 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
             if path == "/deps/install":
                 started = service.install_deps_async()
                 self._send_json(200, {"started": started})
+                return
+            if path == "/media/probe":
+                media_path = data.get("path")
+                if not isinstance(media_path, str) or not Path(media_path).is_file():
+                    self._send_json(400, {"error": "path must reference a local file"})
+                    return
+                info = service.probe_media_file(media_path)
+                if info is None:
+                    self._send_json(404, {"error": "ffprobe unavailable or probe failed"})
+                    return
+                self._send_json(200, info)
                 return
             if path == "/notifications/test":
                 sent = service.notifier.send(

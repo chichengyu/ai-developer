@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 type MediaClient struct {
@@ -66,6 +67,77 @@ func (c *MediaClient) Task(id int64) (map[string]any, error) {
 	return result, nil
 }
 
+func (c *MediaClient) TaskProgress(id int64) (map[string]any, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/tasks/%d/progress", c.BaseURL, id), nil)
+	if err != nil {
+		return nil, err
+	}
+	c.auth(req)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *MediaClient) TaskEvents(id int64, after int, timeout ...float64) (map[string]any, error) {
+	query := fmt.Sprintf("after=%d", after)
+	if len(timeout) > 0 && timeout[0] > 0 {
+		query += fmt.Sprintf("&timeout=%.1f", timeout[0])
+	}
+	req, err := http.NewRequest(
+		"GET",
+		fmt.Sprintf("%s/tasks/%d/events?%s", c.BaseURL, id, query),
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	c.auth(req)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *MediaClient) WatchProgress(
+	id int64,
+	interval time.Duration,
+	onSnapshot func(map[string]any),
+) error {
+	for {
+		snapshot, err := c.TaskProgress(id)
+		if err != nil {
+			return err
+		}
+		onSnapshot(snapshot)
+		status, _ := snapshot["status"].(string)
+		if status == "succeeded" || status == "failed" || status == "cancelled" {
+			return nil
+		}
+		time.Sleep(interval)
+	}
+}
+
 func (c *MediaClient) DepsProgress() (map[string]any, error) {
 	req, err := http.NewRequest("GET", c.BaseURL+"/deps/progress", nil)
 	if err != nil {
@@ -90,6 +162,28 @@ func (c *MediaClient) DepsProgress() (map[string]any, error) {
 
 func (c *MediaClient) DepsStatus() (map[string]any, error) {
 	req, err := http.NewRequest("GET", c.BaseURL+"/deps/status", nil)
+	if err != nil {
+		return nil, err
+	}
+	c.auth(req)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *MediaClient) Formats() (map[string]any, error) {
+	req, err := http.NewRequest("GET", c.BaseURL+"/formats", nil)
 	if err != nil {
 		return nil, err
 	}

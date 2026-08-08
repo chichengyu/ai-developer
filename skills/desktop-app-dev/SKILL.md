@@ -13,7 +13,7 @@ A consultative Codex skill for shipping native cross-platform desktop GUI applic
 1. category A/B/C/D -- bind to the hardest constraint.
 2. framework decision + rationale -- `python scripts/select_framework.py brief.json`; document rejection reasons for #2/#3.
 3. `tasks.md` DAG -- one card per task via `templates/task_card.md`; tag the showstopper.
-4. scaffold + core code -- threading, SendInput, window enum, resources, UI-01..UI-18, media/web pipelines.
+4. scaffold + core code -- threading, SendInput, window enum, resources, UI-01..UI-19, media/web pipelines.
 5. installer / portable EXE -- source backup first, then build, sign, auto-update.
 6. verification report -- run the Step 6 checklist.
 7. user-facing README + comments -- install/build/log/bug/limitations.
@@ -44,7 +44,7 @@ If the request is ambiguous, ask one clarifying question (the showstopper) befor
 
 ## 界面硬性要求（UI hard requirements）
 
-Every desktop GUI built with this skill inherits mandatory UI-01..UI-18. Record each item in requirements.md during Step 0, implement it in UI tasks, and verify it in Step 6. An item may be skipped only when explicitly waived in requirements.md. MUST open `references/ui_hard_requirements.md` and apply its full rules, Codex-like palette, semantic colors, theme URLs, and acceptance checklist before UI work.
+Every desktop GUI built with this skill inherits mandatory UI-01..UI-19. Record each item in requirements.md during Step 0, implement it in UI tasks, and verify it in Step 6. An item may be skipped only when explicitly waived in requirements.md. MUST open `references/ui_hard_requirements.md` and apply its full rules, Codex-like palette, semantic colors, theme URLs, and acceptance checklist before UI work.
 
 | ID | 硬性要求 |
 |---|---|
@@ -66,10 +66,11 @@ Every desktop GUI built with this skill inherits mandatory UI-01..UI-18. Record 
 | UI-16 | 滚动条明显且菜单图标不丢失 |
 | UI-17 | 表格提示与搜索栏分行 |
 | UI-18 | 重型桌面端界面，禁止 Web 化 |
+| UI-19 | 内置依赖中心：依赖随软件内置管理，点击安装自动极速下载/安装/配置，无需用户介入 |
 
 ## Step 0 -- Deep requirements analysis
 
-Copy `templates/requirements_checklist.md` into requirements.md and fill it in; do not just paraphrase the user. Record each UI-01..UI-18 and CODE-01..CODE-05 item or waiver. Interrogate six buckets: literal, implicit, non-functional, distribution, integration, failure modes. Always ask and record the showstopper, update method, and idle behavior (even "don't care"). Flag common omissions: logging, settings migration, AV false positives, Windows version skew, mixed-DPI, user-data backup, telemetry. Unresolved items become assumptions in requirements.md. Deep dive: `references/task_decomposition.md`.
+Copy `templates/requirements_checklist.md` into requirements.md and fill it in; do not just paraphrase the user. Record each UI-01..UI-19 and CODE-01..CODE-05 item or waiver. Interrogate six buckets: literal, implicit, non-functional, distribution, integration, failure modes. Always ask and record the showstopper, update method, and idle behavior (even "don't care"). Flag common omissions: logging, settings migration, AV false positives, Windows version skew, mixed-DPI, user-data backup, telemetry. Unresolved items become assumptions in requirements.md. Deep dive: `references/task_decomposition.md`.
 
 ## Step 1 -- Classify the app
 
@@ -102,7 +103,7 @@ powershell -File scripts/bootstrap_environment.ps1 -Framework python -Install
 
 "Build me X" is never one task. Decompose until each task is completable in one focused session, independently verifiable, and has few dependencies. Use `templates/task_card.md` -- one card per task.
 
-Standard order: T1 scaffold, T2 data/persistence, T3 core services, T4 UI shell (UI-01..UI-18 + DPI), T5 features, T6 polish, T7 integration, T8 packaging, T9 docs. Mark parallel tasks `[P]`; tag the single project-killing failure `[showstopper]` and verify it early.
+Standard order: T1 scaffold, T2 data/persistence, T3 core services, T4 UI shell (UI-01..UI-19 + DPI), T5 features, T6 polish, T7 integration, T8 packaging, T9 docs. Mark parallel tasks `[P]`; tag the single project-killing failure `[showstopper]` and verify it early.
 
 Each card: title, description, category, acceptance criteria, dependencies, effort, risk + mitigation, verification method. Deep dive + worked examples: `references/task_decomposition.md`.
 
@@ -138,11 +139,29 @@ Apply the `界面硬性要求` section above to every view. Theme tokens, layout
 
 ### 4.6 Media acquisition and task persistence pipeline
 
-For media-downloader / republisher apps, open `references/media_acquisition_playbook.md` and use `scripts/`: `media_session.py`, `media_parser.py`, `page_data_parser.py`, `media_downloader.py`, `hls_downloader.py`, `captcha_solver.py`, `scrape_guard.py`, `browser_session.py`, `task_queue.py`, `ffmpeg_transcoder.py`, `platform_publisher.py`, `media_dependencies.py` (`--install` opt-in), `media_pipeline_service.py`, `setup_media_dependencies.ps1`. Client wrappers: `references/media_pipeline_clients.md` / `clients/README.md`.
+For media-downloader / republisher apps, open `references/media_acquisition_playbook.md` and use `scripts/`: `media_session.py`, `media_parser.py`, `page_data_parser.py`, `media_downloader.py`, `hls_downloader.py`, `captcha_solver.py`, `scrape_guard.py`, `browser_session.py`, `task_queue.py`, `ffmpeg_transcoder.py`, `platform_publisher.py`, `media_formats.py`, `file_converter.py`, `builtin_dependency_manager.py`, `media_dependencies.py` (`--install` opt-in), `media_pipeline_service.py`, `setup_media_dependencies.ps1`. Client wrappers: `references/media_pipeline_clients.md` / `clients/README.md`.
+
+Downloads and conversions emit real-time snapshots with total file size,
+downloaded/output bytes, percent, speed, ETA, chunk/merge counts, and
+remaining time; the sidecar persists them as `progress_meta` and exposes
+`GET /tasks/<id>/progress` plus
+`GET /tasks/<id>/events?after=N&timeout=0..30` (long-poll for live UI).
+`GET /formats` returns the unified catalog (video / audio / image /
+subtitle / document / data / archive), and `kind: "convert"` /
+`kind: "batch-convert"` run single-file or folder conversion through the
+same progress contract.
 
 ### 4.7 Web data pipeline (API collection + data processing)
 
 For page/API collection and rule-based processing, open `references/web_data_pipeline_playbook.md` and use `scripts/`: `api_client.py`, `api_analyzer.py`, `data_processor.py`, `web_data_pipeline.py`, `security_detector.py`, `cloudflare_challenge.py`, `deep_crawler.py`, `browser_session.py`, `captcha_solver.py`, `proxy_pool.py`, `account_manager.py`, `task_scheduler.py`, `notifier.py`. The sidecar accepts `kind: "webdata"` for any desktop UI language.
+
+### 4.8 Heavy desktop architecture and performance
+
+For data-heavy / multi-window / long-lived apps, open `references/heavy_desktop_playbook.md` and copy `templates/heavy_desktop_acceptance.md` into requirements.md. Apply layered architecture + DI, virtualization or paging for large grids, persistent long-running jobs, startup/memory profiling, single-instance and crash reporting. Measure cold start, idle memory, idle CPU, 100k-row latency, and 1-hour memory growth with `scripts/heavy_desktop_verify.ps1 -AppPath <exe> -SampleSeconds 60`.
+
+### 4.9 Desktop UI architecture and theming
+
+For dense native desktop UI, open `references/desktop_ui_playbook.md`, copy `templates/desktop_ui_tokens.json` into the app as the single token source, and run `templates/desktop_ui_checklist.md` with UI-01..UI-19. Cover theme registry / runtime switching, semantic colors, keyboard operation, control catalog, state management, accessibility, and UI performance (virtualization, batched updates, measured scroll latency).
 
 ## Step 5 -- Package
 
@@ -178,7 +197,9 @@ Run before handing back:
 - [ ] Recipients need zero installs and no admin.
 - [ ] Auto-update channel verified end-to-end (install v1 -> publish v2 -> update).
 - [ ] All Step 0 requirements met; deferred items recorded with reasons.
-- [ ] UI-01..UI-18 all pass; any waiver is recorded in requirements.md.
+- [ ] UI-01..UI-19 all pass; any waiver is recorded in requirements.md.
+- [ ] Heavy desktop acceptance (`templates/heavy_desktop_acceptance.md`) passes and `scripts/heavy_desktop_verify.ps1` report matches Step 0 budgets.
+- [ ] Desktop UI checklist (`templates/desktop_ui_checklist.md`) passes at 800x600 / 1920x1080 in light, dark, and high-contrast modes.
 - [ ] CODE-01..CODE-05 all pass; any intentional behavior change is recorded in requirements.md.
 
 ## Step 7 -- Hand off
@@ -187,15 +208,15 @@ Produce a user-facing README with: what the app does, install/run commands, buil
 
 ## Deep references (read on demand)
 
-Read on demand: `references/task_decomposition.md` (Step 0+3), `references/ui_hard_requirements.md` (UI-01..18), `references/minimal_change_requirements.md` (CODE-01..05), `references/media_acquisition_playbook.md`, `references/web_data_pipeline_playbook.md`, `references/media_pipeline_clients.md`, `references/accessibility_cross_platform.md`, `references/framework_matrix.md`, `references/threading_playbook.md`, `references/framework_selection_engine.md`, `references/distribution_playbook.md`, `references/nativeaot_optimization.md`, `references/win32_recipes.md`, `references/restricted_network_playbook.md`, and `INDEX.md` (topic navigation).
+Read on demand: `references/task_decomposition.md` (Step 0+3), `references/ui_hard_requirements.md` (UI-01..19), `references/minimal_change_requirements.md` (CODE-01..05), `references/heavy_desktop_playbook.md`, `references/desktop_ui_playbook.md`, `references/media_acquisition_playbook.md`, `references/web_data_pipeline_playbook.md`, `references/media_pipeline_clients.md`, `references/accessibility_cross_platform.md`, `references/framework_matrix.md`, `references/threading_playbook.md`, `references/framework_selection_engine.md`, `references/distribution_playbook.md`, `references/nativeaot_optimization.md`, `references/win32_recipes.md`, `references/restricted_network_playbook.md`, and `INDEX.md` (topic navigation).
 
 ## Templates (copy-paste starting points)
 
-`templates/requirements_checklist.md`, `templates/requirements_brief.md`, `templates/task_card.md`, `templates/dpi_manifest.xml`, `templates/gui_framework_decision_tree.md`, `templates/release_checklist.md`, `templates/security_checklist.md`.
+`templates/requirements_checklist.md`, `templates/requirements_brief.md`, `templates/task_card.md`, `templates/dpi_manifest.xml`, `templates/gui_framework_decision_tree.md`, `templates/release_checklist.md`, `templates/security_checklist.md`, `templates/heavy_desktop_acceptance.md`, `templates/desktop_ui_tokens.json`, `templates/desktop_ui_checklist.md`.
 
 ## Examples (minimal runnable projects)
 
-`examples/wpf-threading/` (WPF), `examples/winui3-threading/` (WinUI 3), `examples/tkinter-threading/` (tkinter), `examples/pyside6-threading/` (PySide6), `examples/tauri-threading/` (Tauri), `examples/msix-packaging/` (MSIX), `examples/nativeaot-winforms/` (NativeAOT WinForms), `examples/game-automation/` (SendInput).
+`examples/wpf-threading/` (WPF), `examples/winui3-threading/` (WinUI 3), `examples/tkinter-threading/` (tkinter), `examples/pyside6-threading/` (PySide6), `examples/tauri-threading/` (Tauri), `examples/msix-packaging/` (MSIX), `examples/nativeaot-winforms/` (NativeAOT WinForms), `examples/game-automation/` (SendInput), `examples/media-toolkit/` (download + convert + live progress).
 
 ## Framework selection engine
 
@@ -203,4 +224,4 @@ Read on demand: `references/task_decomposition.md` (Step 0+3), `references/ui_ha
 
 ## Tests (fixtures + smoke tests + CI)
 
-Run `tests/smoke_windows.ps1` on Windows (110 / 110 currently pass), `tests/smoke_macos.sh` / `tests/smoke_linux.sh` on macOS/Linux, and `tests/test_arch_awareness.ps1` for build scripts. Python regressions: `test_threading_templates.py`, `test_threading_concurrency.py`, `test_media_pipeline.py`, `test_docs.py`, `test_no_bom.py`. See `tests/README.md`; CI: `.github/workflows/ci.yml` on `ubuntu-22.04`.
+Run `tests/smoke_windows.ps1` on Windows (123 / 123 currently pass), `tests/smoke_macos.sh` / `tests/smoke_linux.sh` on macOS/Linux, and `tests/test_arch_awareness.ps1` for build scripts. Python regressions: `test_threading_templates.py`, `test_threading_concurrency.py`, `test_media_pipeline.py`, `test_docs.py`, `test_no_bom.py`. See `tests/README.md`; CI: `.github/workflows/ci.yml` on `ubuntu-22.04`.

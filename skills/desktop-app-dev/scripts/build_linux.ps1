@@ -93,6 +93,9 @@ elseif ($Tool -eq "go") {
     $env:GOARCH = $entry.GoArch
     $env:GOFLAGS = "$($env:GOFLAGS) -trimpath -buildvcs=false"
     Write-Host "==> GOOS=linux GOARCH=$($entry.GoArch) go build" -ForegroundColor Cyan
+    if (-not (Test-Path -LiteralPath $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    }
     Push-Location $Project
     try {
         & go build -ldflags "-s -w" -o "$OutputDir/myapp"
@@ -113,7 +116,13 @@ elseif ($Tool -eq "python") {
         & $py3.Source -m pip install pyinstaller
         if ($LASTEXITCODE -ne 0) { throw "PyInstaller install failed" }
     }
-    & $py3.Source -m PyInstaller --onefile --windowed --noupx --name myapp $Project
+    if (-not (Test-Path -LiteralPath $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    }
+    $pyName = [System.IO.Path]::GetFileNameWithoutExtension($Project)
+    if (-not $pyName) { $pyName = "myapp" }
+    & $py3.Source -m PyInstaller --onefile --windowed --noupx --name $pyName `
+        --distpath $OutputDir --workpath build --specpath build $Project
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 }
 

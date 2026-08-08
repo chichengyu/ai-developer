@@ -2,7 +2,7 @@
 
 Canonical implementation checklist behind the `界面硬性要求` table in
 `SKILL.md`. Every desktop GUI built with this skill must pass
-UI-01..UI-18 unless the user explicitly waives an item in
+UI-01..UI-19 unless the user explicitly waives an item in
 requirements.md. Waived items must still be recorded with the reason.
 
 ## Scope
@@ -10,6 +10,9 @@ requirements.md. Waived items must still be recorded with the reason.
 Applies to the whole app surface: navigation, tables, forms, dialogs,
 menus, toolbars, status bars, theme center, log center, and every
 popup / tooltip. Do not apply these rules to only one page.
+Deep implementation guidance (tokens, theming, controls, keyboard,
+state management, accessibility, UI performance):
+`references/desktop_ui_playbook.md`.
 
 ## UI-01 全局主题与配色统一 (Global theme and color consistency)
 
@@ -245,6 +248,60 @@ Rules:
 - The first screen is the working UI (tables / tools), never a web
   landing or intro page.
 
+### Heavy desktop data / performance rules
+
+- Long lists and grids must be virtualized or paged, never bound to the
+  full dataset at once: WPF `DataGrid` / `VirtualizingStackPanel`, WinUI
+  3 `ItemsRepeater` / `ListView` + incremental loading, Qt
+  `QAbstractItemModel` + `canFetchMore` / `fetchMore`, PySide6
+  `QAbstractTableModel` + lazy fetch, tkinter `ttk.Treeview` + pagination,
+  and virtual-list components when the UI is web-based.
+- Search, filtering, sorting, and aggregation run on the data layer or a
+  background worker; the UI thread only renders the visible page or
+  viewport. Debounce search input and reuse the bounded worker pool from
+  `references/threading_playbook.md`.
+- Keep the app layered for long-term maintenance: UI / view-model /
+  service / data access. .NET WPF / WinUI uses MVVM plus dependency
+  injection; other frameworks use the same separation with their native
+  patterns.
+- Every heavy desktop build records cold start, idle memory, click-to-
+  feedback latency, and a 100k-row (or equivalent) scroll/render test in
+  Step 6; regressions are fixed before release, not after.
+
+## UI-19 内置依赖中心 (Built-in dependency center)
+
+- Every shipped app that needs an external runtime (ffmpeg / ffprobe,
+  tesseract, ImageMagick, Playwright Chromium, aria2, 7z, etc.) manages
+  that runtime inside the app; recipients never install it globally.
+- App-managed runtime directory, no admin required for portable
+  dependencies: `%LOCALAPPDATA%\<AppName>\runtime` (Windows),
+  `~/Library/Application Support/<AppName>/runtime` (macOS),
+  `~/.local/share/<AppName>/runtime` (Linux).
+- The UI shows a dependency center / status row with one entry per
+  dependency: name, version, installed path, status
+  (installed / missing / updating / failed), and one-click actions
+  `安装依赖` / `修复` / `更新`.
+- Clicking install starts a background worker only; the UI thread never
+  blocks. Progress is real-time: percent, downloaded / total bytes,
+  speed, ETA, stage, and current dependency.
+- After the click the flow is fully automatic: parallel chunked
+  download with resume, checksum verification, safe extraction,
+  app-local path configuration, and status refresh. No terminal
+  commands, no manual PATH editing, no browser download page, no
+  interactive prompts.
+- The app never auto-installs silently on launch. Startup only checks
+  status and shows the install button; install requires the explicit
+  user click.
+- Reuse a local download cache and already-installed binaries; support
+  retry / resume / repair when a dependency is missing, corrupt, or
+  version-outdated.
+- The app uses the app-local binary path directly (for example the
+  ffmpeg path passed to the conversion engine), never relying on the
+  recipient's system PATH.
+- Failure goes to the log center (UI-13) with the exact reason and a
+  suggested fix; the install / repair button remains available for
+  retry.
+
 ## Acceptance checklist
 
 - [ ] UI-01 one token source; Codex-like default when no theme specified
@@ -266,3 +323,6 @@ Rules:
 - [ ] UI-17 table hints on a separate line from search
 - [ ] UI-18 heavy desktop shell; no web-style layout or web landing
   first screen
+- [ ] UI-19 one-click dependency center downloads into app-local
+  runtime with live bytes / speed / ETA, no manual input, no global
+  install, and retry / repair on failure

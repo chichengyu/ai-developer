@@ -35,3 +35,46 @@ Example task:
 ```json
 {"kind": "download", "payload": {"url": "https://example.com/video.mp4", "dest": "out/video.mp4"}, "dedupe_key": "sha256:url"}
 ```
+
+## Live progress
+
+Every wrapper exposes `taskProgress(id)` and `taskEvents(id, after)` so the
+UI can poll real-time snapshots without reimplementing the engine.
+
+Every wrapper also exposes `formats()` (named `FormatsAsync` / `Formats`
+in C# / Go) to load the unified format catalog from `GET /formats`.
+Task kinds include `download`, `batch-download`, `hls`, `transcode`,
+`convert`, `batch-convert`, `analyze`, `crawl`, `webdata`, and `publish`.
+
+```text
+GET /tasks/<id>/progress
+GET /tasks/<id>/events?after=<event-count>&timeout=<0-30>
+```
+
+`/tasks/<id>/progress` returns `status`, `stage`, `progress` (0.0 to 1.0),
+and `progress_meta`. The `progress_meta` object includes the fields that
+match the current kind:
+
+- download: `downloaded`, `total`, `percent`, `speed`, `speed_avg`, `eta_s`,
+  `chunks_done`, `chunks_total`, `merge_done`, `merge_total`, `elapsed_s`,
+  `phase`
+- hls: `done`, `total`, `percent`, `downloaded_bytes`, `total_bytes`,
+  `output_size`, `stage`
+- transcode: `percent`, `out_time_s`, `speed`, `fps`, `bitrate`,
+  `input_size`, `output_size`, `duration_s`, `remaining_s`, `frame`, `state`
+- convert: `input_size`, `output_size`, `percent`, `stage`, `elapsed_s`
+- batch-convert: `done`, `total`, `input_bytes_done`, `total_input_bytes`,
+  `output_bytes`, `current`, `percent`, `elapsed_s`
+
+`/tasks/<id>/events` returns ordered `events` plus `next`; each event has
+`stage`, `percent`, `message`, `meta`, and `at`. Poll with `after=next` to
+receive only new events. Pass a positive `timeout` (up to 30 seconds) to
+long-poll: the request waits for the next event instead of returning
+immediately, which gives near-real-time updates without busy polling.
+
+The `taskEvents` wrappers accept an optional `timeout` argument:
+`taskEvents(id, after, timeout)`.
+
+The TypeScript and Go wrappers also include `watchProgress(id, callback)`
+helpers that poll until the task reaches `succeeded`, `failed`, or
+`cancelled`.

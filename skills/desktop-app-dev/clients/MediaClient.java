@@ -44,6 +44,30 @@ public final class MediaClient {
         return http.send(request, HttpResponse.BodyHandlers.ofString()).body();
     }
 
+    public String taskProgress(long id) throws Exception {
+        HttpRequest request = auth(HttpRequest.newBuilder())
+                .uri(URI.create(baseUrl + "/tasks/" + id + "/progress"))
+                .GET()
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString()).body();
+    }
+
+    public String taskEvents(long id, int after) throws Exception {
+        return taskEvents(id, after, 0);
+    }
+
+    public String taskEvents(long id, int after, double timeout) throws Exception {
+        String query = after + "&timeout=" + timeout;
+        if (timeout <= 0) {
+            query = String.valueOf(after);
+        }
+        HttpRequest request = auth(HttpRequest.newBuilder())
+                .uri(URI.create(baseUrl + "/tasks/" + id + "/events?after=" + query))
+                .GET()
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString()).body();
+    }
+
     public String depsProgress() throws Exception {
         HttpRequest request = auth(HttpRequest.newBuilder())
                 .uri(URI.create(baseUrl + "/deps/progress"))
@@ -55,6 +79,14 @@ public final class MediaClient {
     public String depsStatus() throws Exception {
         HttpRequest request = auth(HttpRequest.newBuilder())
                 .uri(URI.create(baseUrl + "/deps/status"))
+                .GET()
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString()).body();
+    }
+
+    public String formats() throws Exception {
+        HttpRequest request = auth(HttpRequest.newBuilder())
+                .uri(URI.create(baseUrl + "/formats"))
                 .GET()
                 .build();
         return http.send(request, HttpResponse.BodyHandlers.ofString()).body();

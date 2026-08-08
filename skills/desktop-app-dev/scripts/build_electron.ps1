@@ -57,7 +57,7 @@ if ($pkg.scripts.build) {
 }
 
 # 3. Run electron-builder
-$ebArgs = @("-c.compression=maximum", "-c.asar=true", "-c.npmRebuild=false")
+$ebArgs = @("-c.compression=maximum", "-c.asar=true", "-c.npmRebuild=false", "-c.directories.output=$OutputDir")
 if ($Config) { $ebArgs += "--config"; $ebArgs += $Config }
 if ($Target -eq "all") {
     $ebArgs += "--win"; $ebArgs += "nsis"; $ebArgs += "msi"; $ebArgs += "portable"
@@ -81,12 +81,12 @@ Write-Host "==> electron-builder $ebArgs" -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "electron-builder failed" }
 
 # 4. Collect
-if (Test-Path "dist") {
-    Get-ChildItem dist -File -Recurse | ForEach-Object {
+if (Test-Path -LiteralPath $OutputDir) {
+    Get-ChildItem -LiteralPath $OutputDir -File -Recurse | ForEach-Object {
         $size = $_.Length
         Write-Host ("==> Artifact: {0}  ({1:N1} MB / {2:N0} KB)" -f $_.FullName, ($size / 1MB), ($size / 1KB)) -ForegroundColor Green
     }
 }
-Write-Host "==> Done. Output under ./dist" -ForegroundColor Green
+Write-Host "==> Done. Output under $OutputDir" -ForegroundColor Green
 Write-Host "Next: sign the EXE with signtool, then test on a clean Windows VM." -ForegroundColor Yellow
 

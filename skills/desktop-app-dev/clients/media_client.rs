@@ -48,6 +48,45 @@ impl MediaClient {
             .await
     }
 
+    pub async fn task_progress(&self, id: i64) -> Result<Value, reqwest::Error> {
+        let mut request = self
+            .client
+            .get(format!("{}/tasks/{}/progress", self.base_url, id));
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        request
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub async fn task_events(
+        &self,
+        id: i64,
+        after: usize,
+        timeout: Option<f64>,
+    ) -> Result<Value, reqwest::Error> {
+        let mut query = format!("after={}", after);
+        if let Some(seconds) = timeout {
+            if seconds > 0.0 {
+                query.push_str(&format!("&timeout={}", seconds));
+            }
+        }
+        let mut request = self
+            .client
+            .get(format!("{}/tasks/{}/events?{}", self.base_url, id, query));
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        request
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
     pub async fn deps_progress(&self) -> Result<Value, reqwest::Error> {
         let mut request = self
             .client
@@ -66,6 +105,18 @@ impl MediaClient {
         let mut request = self
             .client
             .get(format!("{}/deps/status", self.base_url));
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        request
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub async fn formats(&self) -> Result<Value, reqwest::Error> {
+        let mut request = self.client.get(format!("{}/formats", self.base_url));
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }

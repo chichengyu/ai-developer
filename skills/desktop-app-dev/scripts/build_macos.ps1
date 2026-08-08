@@ -88,7 +88,7 @@ elseif ($Tool -eq "xcode") {
     if (-not (Get-Command xcodebuild -ErrorAction SilentlyContinue)) {
         throw "xcodebuild not on PATH. Install Xcode from the App Store."
     }
-    & xcodebuild -project $Project -scheme (Split-Path $Project -LeafBase) -configuration $Configuration `
+    & xcodebuild -project $Project -scheme ([System.IO.Path]::GetFileNameWithoutExtension($Project)) -configuration $Configuration `
         -destination "generic/platform=$(if ($Arch -eq 'arm64') {'macOS'} else {'macOS'}),arch=$($entry.Xcode)" `
         "SWIFT_OPTIMIZATION_LEVEL=-Osize" `
         -derivedDataPath "$OutputDir/derived"

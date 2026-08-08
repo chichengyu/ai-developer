@@ -14,7 +14,7 @@ param(
     [ValidateSet("copyused", "partial", "full")]
     [string] $TrimMode = "partial",
     [bool] $InvariantGlobalization = $true,   # drop ICU data; disable for localized apps
-    [switch] $Costura,
+    [switch] $Costura,             # validate Costura.Fody config; embedding runs during build
     [switch] $BackupSource,          # timestamped source zip before publishing
     [string] $OutputDir = ""         # explicit publish output dir
 )
@@ -35,6 +35,16 @@ if ($csprojText -match "<TargetFrameworks>\s*([^<;]+)") {
     $tfm = $Matches[1].Trim()
 } elseif ($csprojText -match "<TargetFramework>\s*([^<]+)") {
     $tfm = $Matches[1].Trim()
+}
+
+if ($Costura) {
+    $projectDir = Split-Path -Parent $Project
+    $hasCostura = $csprojText -match "Costura\.Fody"
+    $hasWeavers = Test-Path -LiteralPath (Join-Path $projectDir "FodyWeavers.xml")
+    if (-not $hasCostura -or -not $hasWeavers) {
+        throw "Costura was requested, but the project does not reference Costura.Fody or FodyWeavers.xml is missing. Add <PackageReference Include=`"Costura.Fody`" PrivateAssets=`"all`" /> plus FodyWeavers.xml with <Costura />, or remove -Costura."
+    }
+    Write-Host "==> Costura.Fody detected; native DLL embedding runs during build." -ForegroundColor Cyan
 }
 
 if ($BackupSource) {

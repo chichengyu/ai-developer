@@ -40,6 +40,7 @@ class TaskRecord:
     progress: float
     stage: str | None
     resume_token: dict[str, Any] | None
+    progress_meta: dict[str, Any] | None
     error: str | None
     result_path: str | None
     run_after: str | None
@@ -51,6 +52,7 @@ class TaskRecord:
     def from_row(cls, row: sqlite3.Row) -> TaskRecord:
         payload = json.loads(row["payload"]) if row["payload"] else {}
         resume = json.loads(row["resume_token"]) if row["resume_token"] else None
+        meta = json.loads(row["progress_meta"]) if row["progress_meta"] else None
         return cls(
             id=int(row["id"]),
             kind=row["kind"],
@@ -62,6 +64,7 @@ class TaskRecord:
             progress=float(row["progress"]),
             stage=row["stage"],
             resume_token=resume if isinstance(resume, dict) else None,
+            progress_meta=meta if isinstance(meta, dict) else None,
             error=row["error"],
             result_path=row["result_path"],
             run_after=row["run_after"],
@@ -137,6 +140,7 @@ class TaskQueue:
                     progress REAL NOT NULL DEFAULT 0,
                     stage TEXT,
                     resume_token TEXT,
+                    progress_meta TEXT,
                     error TEXT,
                     result_path TEXT,
                     run_after TEXT,
@@ -148,6 +152,8 @@ class TaskQueue:
             columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(tasks)")}
             if "run_after" not in columns:
                 self._conn.execute("ALTER TABLE tasks ADD COLUMN run_after TEXT")
+            if "progress_meta" not in columns:
+                self._conn.execute("ALTER TABLE tasks ADD COLUMN progress_meta TEXT")
             self._conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_tasks_status_priority
@@ -304,19 +310,21 @@ class TaskQueue:
         progress: float,
         stage: str | None = None,
         resume_token: dict[str, Any] | None = None,
+        progress_meta: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
                 """
                 UPDATE tasks
                 SET progress = ?, stage = COALESCE(?, stage),
-                    resume_token = ?, updated_at = ?
+                    resume_token = ?, progress_meta = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     min(max(progress, 0.0), 1.0),
                     stage,
                     json.dumps(resume_token, ensure_ascii=False) if resume_token else None,
+                    json.dumps(progress_meta, ensure_ascii=False) if progress_meta else None,
                     self._now(),
                     task_id,
                 ),

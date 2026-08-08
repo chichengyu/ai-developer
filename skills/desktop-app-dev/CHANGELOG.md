@@ -2,6 +2,265 @@
 
 All notable improvements to this skill. Newest entries first.
 
+## 2026-08-08 (round 41) -- Heavy desktop + desktop UI deep enhancement
+
+### Added
+
+- `references/heavy_desktop_playbook.md` -- layered architecture + DI,
+  virtualization / paging matrix, long-running job persistence,
+  startup/memory profiling, single-instance / crash readiness, plugin
+  isolation, and 100k-row acceptance.
+- `references/desktop_ui_playbook.md` -- design tokens, theme registry,
+  control catalog, layout, data grids, keyboard interaction, state
+  management, accessibility, and UI performance.
+- `templates/heavy_desktop_acceptance.md` -- fill-in acceptance for data
+  volume, architecture, long jobs, performance, stability, windows, and
+  plugins.
+- `templates/desktop_ui_tokens.json` -- one token source with light / dark /
+  high-contrast colors, typography, spacing, radii, dimensions, and motion.
+- `templates/desktop_ui_checklist.md` -- deep UI acceptance across theming,
+  layout, controls, interaction, accessibility, performance, and
+  screenshots.
+- `scripts/heavy_desktop_verify.ps1` -- starts or attaches to a desktop
+  app, measures cold start / working set / private memory / CPU, and writes
+  an optional JSON report; includes `-SelfTest`.
+
+### Docs
+
+- `SKILL.md` adds Step 4.8 (heavy desktop) and Step 4.9 (desktop UI),
+  new Step 6 release gates, and links to the new references / templates.
+- `README.md`, `INDEX.md`, and `references/ui_hard_requirements.md` add
+  entry points for heavy desktop and deep desktop UI work.
+
+### Tests
+
+- `tests/test_docs.py` verifies the two new playbooks, acceptance
+  templates, token JSON, and `heavy_desktop_verify.ps1`.
+- `tests/smoke_windows.ps1` adds the profiler self-test and heavy/UI
+  wiring checks; 123/123 pass.
+
+## 2026-08-08 (round 40) -- Build helper output/arch/Costura fixes
+
+### Fixed
+
+- `scripts/build_linux.ps1` now honors `-OutputDir` for both Go and
+  PyInstaller branches; Go creates the output directory before building,
+  and PyInstaller writes through `--distpath` / `--workpath` / `--specpath`
+  instead of dumping into `./dist`.
+- `scripts/build_electron.ps1` now passes
+  `-c.directories.output=$OutputDir` to electron-builder and scans the
+  configured directory instead of hardcoded `dist`.
+- `scripts/build_dotnet.ps1` no longer treats `-Costura` as a silent
+  no-op: it validates the project references `Costura.Fody` and has
+  `FodyWeavers.xml`, and explains the requirement when missing.
+- `scripts/build_kotlin_compose.ps1` warns when `-Arch` differs from the
+  host because Compose Desktop packaging is host-bound.
+- `scripts/build_macos.ps1` no longer uses PowerShell-7-only
+  `Split-Path -LeafBase`; scheme names now resolve with
+  `GetFileNameWithoutExtension()`.
+
+### Docs
+
+- `references/ui_hard_requirements.md` adds heavy desktop data /
+  performance rules under UI-18: virtualization or paging for long
+  lists/grids, data-layer filtering, layered architecture, and 100k-row
+  verification before release.
+
+### Tests
+
+- `tests/smoke_windows.ps1` adds 5 static regression checks for the fixes
+  above and `tests/test_docs.py` locks the new heavy-desktop terms;
+  119/119 pass.
+
+## 2026-08-08 (round 39) -- UI-19 built-in dependency center + app-local manager
+
+### Added
+
+- Global hard requirement `UI-19 内置依赖中心`: every desktop app that
+  needs an external runtime (ffmpeg / tesseract / ImageMagick / Playwright
+  Chromium / 7z, etc.) manages it inside the app; the user clicks
+  `安装依赖`, and the app automatically downloads / installs / configures
+  with live bytes, speed, ETA, and stage. No terminal commands, no manual
+  PATH editing, no global install, no interactive prompts.
+- `scripts/builtin_dependency_manager.py` -- generic app-local dependency
+  manager: JSON manifest, check-only default, parallel chunked resumable
+  downloads, SHA-256 verification, safe zip/tar extraction, portable /
+  archive / pip / detect kinds, app-local bin paths, and environment
+  configuration.
+- `scripts/media_dependencies.py` -- ffmpeg zip now downloads through the
+  chunked concurrent resumable downloader with a local cache and live
+  bytes / speed / ETA progress instead of a single-stream fetch.
+
+### Docs
+
+- `SKILL.md`, `README.md`, `INDEX.md`,
+  `references/ui_hard_requirements.md`,
+  `templates/requirements_checklist.md`,
+  `templates/release_checklist.md`,
+  `references/media_acquisition_playbook.md`, and
+  `references/media_pipeline_clients.md` updated with UI-01..UI-19 and
+  the built-in dependency center contract.
+
+### Tests
+
+- `tests/test_media_pipeline.py` -- 3 new cases (archive install with
+  checksum, portable install + checksum mismatch, check-only default);
+  81/81 pass.
+
+## 2026-08-08 (round 38) -- Unified all-format catalog + generic conversion + batch progress
+
+### Added
+
+- `scripts/media_formats.py` -- unified format registry covering video,
+  audio, image, subtitle, document, data, and archive targets, with
+  ffmpeg / stdlib / copy / optional engine hints, `lookup_format()`,
+  `catalog_payload()`, and a `--list` / `--lookup` CLI.
+- `scripts/file_converter.py` -- generic single-file and folder conversion:
+  ffmpeg for media/images, stdlib for text / markdown / HTML / CSV / JSON /
+  JSONL / XML / INI / SRT / VTT / ASS and ZIP/TAR/GZ/BZ2/XZ archives, plus
+  safe `extract_archive()` and aggregate byte-based `convert_many()`
+  progress.
+- `scripts/ffmpeg_transcoder.py` -- expanded format presets and container
+  mappings: m2ts/mts, mpeg, flv, wmv, m4v, 3gp, ogv, vob, asf, mka, oga,
+  aiff, wma, amr, mp2, dts, eac3, m4b, alac, and jpg/png/bmp/tiff/webp/
+  avif/heic/jxl/ico image targets, plus per-codec quality args and
+  single-frame image extraction.
+- `scripts/media_downloader.py` -- checkpoint validation against ETag /
+  Last-Modified, optional `expected_sha256` verification, `content_type` /
+  `filename` on `DownloadResult`, and `download_batch()` with aggregate
+  bytes, speed, ETA, and per-file progress.
+- `scripts/media_pipeline_service.py` -- `GET /formats` plus
+  `kind: "convert"`, `kind: "batch-convert"`, and
+  `kind: "batch-download"` tasks with the same live progress/event
+  contract.
+- `clients/*` -- `formats()` / `Formats()` / `FormatsAsync()` wrappers in
+  TypeScript, C# / .NET, Go, Rust, Kotlin, Swift, Java, and C++.
+- `examples/media-toolkit/` -- runnable tkinter demo with live download
+  percent / total size / speed / ETA and an all-format conversion tab.
+
+### Tests
+
+- `tests/test_media_pipeline.py` -- 6 new cases (format catalog/profile
+  integration, text/archive/subtitle/batch conversion, ffmpeg dispatch +
+  optional-target error, ETag/hash download integrity, batch download
+  progress, sidecar formats + convert tasks); 78/78 pass.
+
+### Docs
+
+- `README.md`, `SKILL.md`, `INDEX.md`,
+  `references/media_acquisition_playbook.md`,
+  `references/media_pipeline_clients.md`, `clients/README.md`,
+  `examples/README.md`, and `tests/README.md` updated with the unified
+  format catalog, conversion kinds, batch progress, and the new example.
+
+## 2026-08-08 (round 37) -- Live long-poll events + download throttle + real ffmpeg progress
+
+### Added
+
+- `scripts/ffmpeg_transcoder.py` -- every generated ffmpeg command now
+  includes `-progress pipe:1 -nostats`, so real encodes emit live
+  `out_time_ms` / `total_size` / `fps` / `bitrate` / `frame` progress
+  instead of only parsing fake output.
+- `scripts/media_downloader.py` -- shared `SpeedLimiter` and
+  `max_speed_bytes_per_sec` download option; total throughput is capped
+  across all shards while keeping adaptive concurrency and resume.
+- `scripts/media_pipeline_service.py` -- task events support long polling
+  via `GET /tasks/<id>/events?after=N&timeout=0..30`; the request waits
+  for the next event instead of returning immediately.
+- `clients/*` -- `taskEvents(id, after, timeout)` wrappers now expose the
+  long-poll timeout in TypeScript, C# / .NET, Go, Rust, Kotlin, Swift,
+  Java, and C++.
+
+### Tests
+
+- `tests/test_media_pipeline.py` -- 3 new cases (speed limiter throttle,
+  download speed-limit integration, sidecar long-poll events) plus
+  assertions that generated ffmpeg args contain the real progress flags;
+  72/72 pass.
+
+### Docs
+
+- `references/media_acquisition_playbook.md`,
+  `references/media_pipeline_clients.md`, and `clients/README.md` updated
+  with `max_speed_bytes_per_sec`, `-progress pipe:1 -nostats`, and the
+  long-poll event API.
+
+## 2026-08-08 (round 36) -- Real-time progress snapshots + total size + richer formats
+
+### Added
+
+- `scripts/media_downloader.py` -- automatic shard sizing for small files,
+  `probe` / `merge` / `done` progress snapshots with total file size,
+  downloaded bytes, percent, speed, window `speed_avg`, ETA, chunk counts,
+  merge progress, and elapsed time; `DownloadResult` now returns elapsed
+  time and average speed.
+- `scripts/ffmpeg_transcoder.py` -- rich transcode snapshots
+  (`input_size`, `output_size`, `duration_s`, `remaining_s`, `fps`,
+  `bitrate`, `frame`, `state`), a `finalize` event with the real output file
+  size, new format profiles (`avi`, `ts`, `ogg`, `opus`, `aac`, `ac3`,
+  `gif`), and `start_time` / `duration` / `threads` options.
+- `scripts/hls_downloader.py` -- HLS progress now reports downloaded bytes
+  and the final merged output size.
+- `scripts/task_queue.py` / `scripts/media_pipeline_service.py` -- SQLite
+  `progress_meta` column with migration, persisted progress snapshots,
+  richer task events, `GET /tasks/<id>/progress`, and payload forwarding
+  for `auto_chunk_sizing`, `start_time`, `duration`, and `threads`.
+- `clients/*` -- `taskProgress` / `taskEvents` in TypeScript, C# / .NET,
+  Go, Rust, Kotlin, Swift, Java, and C++; TypeScript and Go also ship a
+  `watchProgress` helper that polls until the task finishes.
+
+### Tests
+
+- `tests/test_media_pipeline.py` -- 5 new cases (progress metadata
+  persistence, download total-size snapshots, auto chunk sizing, rich
+  transcode progress, sidecar progress endpoint); 69/69 pass.
+
+### Docs
+
+- `references/media_acquisition_playbook.md`,
+  `references/media_pipeline_clients.md`, `clients/README.md`, `SKILL.md`,
+  `README.md`, and `INDEX.md` updated with the live progress snapshot
+  contract, richer format presets, and client polling helpers.
+
+## 2026-08-08 (round 35) -- Extreme download + format transcode deep enhancement
+
+### Added
+
+- `scripts/media_downloader.py` -- adaptive AIMD concurrency with a
+  sliding-window speed tracker (live speed / ETA in progress), slow-shard
+  restart with per-chunk cancellation and restart limit, and a 1-byte
+  Range GET fallback when HEAD hides the file size.
+- `scripts/media_session.py` -- `Content-Range` parsing so chunked resume
+  works even when servers omit `Accept-Ranges`.
+- `scripts/hls_downloader.py` -- segment retries with backoff,
+  `#EXT-X-BYTERANGE` byte-range segments, `#EXT-X-MAP` init segment
+  download, suffix-aware segment naming, and direct concatenation
+  fallback when ffmpeg is absent.
+- `scripts/media_parser.py` -- `#EXT-X-MAP`, `#EXT-X-BYTERANGE`, and
+  `#EXT-X-ENDLIST` parsing with sequential byte-range offsets.
+- `scripts/ffmpeg_transcoder.py` -- named format presets
+  (mp4/mp4-hq/hevc/hevc-hq/webm/mp3/m4a/wav/flac/mkv/mov), GPU encoder
+  auto-detection (NVENC/AMF/QSV/VideoToolbox), smart copy/remux when
+  source codecs already match the target, resolution/bitrate/fps/audio
+  options, `build_ffmpeg_args()` for testable command construction, and a
+  `--list-profiles` CLI.
+- `scripts/media_pipeline_service.py` -- download / HLS / transcode
+  payload options forwarded to the engine plus `POST /media/probe` for
+  local media inspection.
+
+### Tests
+
+- `tests/test_media_pipeline.py` -- 8 new cases (speed tracker/tuning,
+  adaptive download, Content-Range fallback, HLS BYTERANGE / init /
+  fallback merge, transcode presets / hardware / copy, fake-ffmpeg
+  progress, sidecar probe, sidecar transcode options); 64/64 pass.
+
+### Docs
+
+- `references/media_acquisition_playbook.md` and
+  `references/media_pipeline_clients.md` updated with the new download,
+  HLS, transcode, and probe APIs.
+
 ## 2026-08-08 (round 34) -- Slim SKILL.md with mandatory hooks
 
 ### Changed

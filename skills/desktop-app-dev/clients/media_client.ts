@@ -5,6 +5,23 @@ export interface TaskBody {
   priority?: number;
 }
 
+export interface ProgressEvent {
+  stage: string;
+  percent: number | null;
+  message: string;
+  meta?: Record<string, unknown> | null;
+  at: number;
+}
+
+export interface TaskProgress {
+  task_id: number;
+  status: string;
+  progress: number;
+  stage: string | null;
+  progress_meta?: Record<string, unknown> | null;
+  events: ProgressEvent[];
+}
+
 export class MediaClient {
   constructor(
     private readonly baseUrl = "http://127.0.0.1:8765",
@@ -40,8 +57,54 @@ export class MediaClient {
     return response.json();
   }
 
+  async taskProgress(id: number | string): Promise<TaskProgress> {
+    const response = await fetch(`${this.baseUrl}/tasks/${id}/progress`, {
+      headers: this.headers(),
+    });
+    return response.json();
+  }
+
+  async taskEvents(
+    id: number | string,
+    after = 0,
+    timeout = 0,
+  ): Promise<{ events: ProgressEvent[]; next: number }> {
+    const params = new URLSearchParams({ after: String(after) });
+    if (timeout > 0) {
+      params.set("timeout", String(timeout));
+    }
+    const response = await fetch(
+      `${this.baseUrl}/tasks/${id}/events?${params}`,
+      { headers: this.headers() },
+    );
+    return response.json();
+  }
+
+  async watchProgress(
+    id: number | string,
+    onProgress: (snapshot: TaskProgress) => void,
+    intervalMs = 500,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    while (!signal?.aborted) {
+      const snapshot = await this.taskProgress(id);
+      onProgress(snapshot);
+      if (["succeeded", "failed", "cancelled"].includes(snapshot.status)) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+
   async depsStatus(): Promise<unknown> {
     const response = await fetch(`${this.baseUrl}/deps/status`, {
+      headers: this.headers(),
+    });
+    return response.json();
+  }
+
+  async formats(): Promise<unknown> {
+    const response = await fetch(`${this.baseUrl}/formats`, {
       headers: this.headers(),
     });
     return response.json();

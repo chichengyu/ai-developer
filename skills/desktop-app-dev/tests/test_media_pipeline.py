@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -24,6 +25,11 @@ from account_manager import AccountManager  # noqa: E402
 from api_analyzer import analyze_captures  # noqa: E402
 from api_client import ApiClient, ApiSpec, build_api_specs  # noqa: E402
 from browser_session import BrowserSession, FingerprintOptions, NetworkCaptureOptions  # noqa: E402
+from builtin_dependency_manager import (  # noqa: E402
+    BuiltinDependencyManager,
+    DependencyError,
+    DependencySpec,
+)
 from captcha_solver import (  # noqa: E402
     AutoCaptchaSolver,
     CaptchaChallenge,
@@ -41,9 +47,48 @@ from cloudflare_challenge import (  # noqa: E402
 )
 from data_processor import load_records, process_records, save_records  # noqa: E402
 from deep_crawler import CrawlConfig, DeepCrawler  # noqa: E402
+from ffmpeg_transcoder import (  # noqa: E402
+    EXTENSION_PROFILE,
+    TRANSCODE_PROFILES,
+    MediaInfo,
+    TranscodeOptions,
+    build_ffmpeg_args,
+    parse_encoder_list,
+    select_hardware_encoder,
+    transcode_file,
+)
+from ffmpeg_transcoder import (  # noqa: E402
+    main as transcode_main,
+)
+from file_converter import (  # noqa: E402
+    BatchConvertProgress,
+    ConversionUnavailable,
+    ConvertResult,
+    convert_file,
+    convert_many,
+    extract_archive,
+)
 from hls_downloader import download_hls  # noqa: E402
 from media_dependencies import _zip_member_is_safe, check_status  # noqa: E402
-from media_downloader import download_file, safe_output_name  # noqa: E402
+from media_downloader import (  # noqa: E402
+    BatchDownloadResult,
+    DownloadHashError,
+    SpeedLimiter,
+    SpeedTracker,
+    _build_chunk_map,
+    _load_chunk_map,
+    _tune_concurrency,
+    download_batch,
+    download_file,
+    safe_output_name,
+)
+from media_formats import (  # noqa: E402
+    FORMAT_CATALOG,
+    catalog_payload,
+    engine_targets,
+    formats_by_category,
+    lookup_format,
+)
 from media_parser import extract_media_urls, parse_m3u8  # noqa: E402
 from media_pipeline_service import (  # noqa: E402
     MediaPipelineService,
@@ -153,6 +198,8 @@ class _RangeHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("ETag", f'"v1-{len(data)}"')
+        self.send_header("Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT")
         self.end_headers()
         if not head_only:
             self.wfile.write(data[start : end + 1])
@@ -176,6 +223,39 @@ class _NoLengthHandler(http.server.BaseHTTPRequestHandler):
         data = self.payloads.get(self.path, b"")
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+class _RangeFallbackHandler(http.server.BaseHTTPRequestHandler):
+    """HEAD hides length/ranges; GET Range still reports Content-Range."""
+
+    payloads: dict[str, bytes] = {}
+
+    def do_HEAD(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        data = self.payloads.get(self.path, b"")
+        range_header = self.headers.get("Range")
+        if range_header:
+            match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+            if match:
+                start = int(match.group(1))
+                end = min(int(match.group(2)) if match.group(2) else len(data) - 1, len(data) - 1)
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+                self.send_header("Content-Length", str(max(0, end - start + 1)))
+                self.end_headers()
+                self.wfile.write(data[start : end + 1])
+                return
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
@@ -486,6 +566,30 @@ def test_task_queue_delayed_retry() -> None:
         retried = queue.claim_next()
         assert retried is not None and retried.attempts == 2
         queue.close()
+
+
+def test_task_queue_progress_meta() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Path(tmp) / "tasks.sqlite"
+        queue = TaskQueue(db)
+        task = queue.enqueue("download", {"url": "x", "dest": "y"})
+        meta = {
+            "downloaded": 4096,
+            "total": 102400,
+            "percent": 0.04,
+            "speed": 8192.0,
+            "eta_s": 12.0,
+        }
+        queue.update_progress(task.id, 0.04, stage="download", progress_meta=meta)
+        record = queue.get(task.id)
+        assert record is not None
+        assert record.progress_meta == meta
+        queue.close()
+
+        reopened = TaskQueue(db)
+        persisted = reopened.get(task.id)
+        assert persisted is not None and persisted.progress_meta == meta
+        reopened.close()
 
 
 def test_media_parser() -> None:
@@ -862,6 +966,147 @@ def test_download_without_content_length() -> None:
         server.shutdown()
 
 
+def test_download_progress_total_size_and_meta() -> None:
+    payload = bytes(range(128)) * 32
+    base, server = _start_server({"/video.bin": payload})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "video.bin"
+            events = []
+            result = download_file(
+                f"{base}/video.bin",
+                dest,
+                session=MediaSession(),
+                chunk_size=37,
+                concurrency=3,
+                progress=events.append,
+            )
+            assert result.path.read_bytes() == payload
+            assert result.chunks_total == result.chunks_downloaded
+            assert result.elapsed_s >= 0.0
+            assert result.average_speed >= 0.0
+            assert events, "download must emit progress snapshots"
+            probe = events[0]
+            assert probe.stage == "probe"
+            assert probe.total == len(payload)
+            assert probe.downloaded == 0
+            assert any(event.phase == "merge" for event in events)
+            done = events[-1]
+            assert done.stage == "done"
+            assert done.phase == "done"
+            assert done.percent == 1.0
+            assert done.downloaded == len(payload)
+            assert done.total == len(payload)
+            assert done.merge_total == len(payload)
+            assert done.chunks_total == result.chunks_total
+    finally:
+        server.shutdown()
+
+
+def test_download_auto_chunk_sizing() -> None:
+    payload = bytes(range(256)) * (4 * 1024 * 1024 // 256)
+    base, server = _start_server({"/video.bin": payload})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "video.bin"
+            result = download_file(
+                f"{base}/video.bin",
+                dest,
+                session=MediaSession(),
+                concurrency=4,
+            )
+            assert result.path.read_bytes() == payload
+            assert result.chunks_total == 16
+    finally:
+        server.shutdown()
+
+
+def test_speed_tracker_and_tuning() -> None:
+    tracker = SpeedTracker(window_seconds=1.0)
+    tracker.add(100, 0.0)
+    tracker.add(100, 0.5)
+    assert tracker.speed(1.0) == 200.0
+    tracker.add(100, 1.0)
+    tracker.add(100, 1.5)
+    assert tracker.speed(2.0) == 200.0
+    assert _tune_concurrency(100.0, 120.0, 2, 4) == 3
+    assert _tune_concurrency(100.0, 80.0, 3, 4) == 2
+    assert _tune_concurrency(100.0, 100.0, 2, 4) == 2
+    assert _tune_concurrency(100.0, 120.0, 2, 4, error_burst=True) == 1
+
+
+def test_speed_limiter_throttles() -> None:
+    limiter = SpeedLimiter(4096)
+    start = time.monotonic()
+    for _ in range(4):
+        limiter.wait(4096)
+    elapsed = time.monotonic() - start
+    assert elapsed >= 2.8
+
+
+def test_download_speed_limit_integration() -> None:
+    payload = bytes(range(256)) * 256
+    base, server = _start_server({"/video.bin": payload})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "video.bin"
+            result = download_file(
+                f"{base}/video.bin",
+                dest,
+                session=MediaSession(),
+                chunk_size=37,
+                concurrency=3,
+                max_speed_bytes_per_sec=1024 * 1024,
+            )
+            assert result.path.read_bytes() == payload
+            assert result.total_size == len(payload)
+    finally:
+        server.shutdown()
+
+
+def test_download_adaptive_concurrency() -> None:
+    payload = bytes(range(256)) * 8
+    base, server = _start_server({"/video.bin": payload})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "video.bin"
+            result = download_file(
+                f"{base}/video.bin",
+                dest,
+                session=MediaSession(),
+                chunk_size=37,
+                concurrency=4,
+                adaptive_concurrency=True,
+                slow_shard_switch=True,
+                slow_after_seconds=0.01,
+                slow_idle_seconds=0.01,
+                tune_interval=0.05,
+            )
+            assert result.path.read_bytes() == payload
+            assert result.total_size == len(payload)
+    finally:
+        server.shutdown()
+
+
+def test_download_content_range_fallback() -> None:
+    payload = bytes(range(64)) * 4
+    base, server = _start_server({"/video.bin": payload}, _RangeFallbackHandler)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "video.bin"
+            result = download_file(
+                f"{base}/video.bin",
+                dest,
+                session=MediaSession(),
+                chunk_size=19,
+                concurrency=3,
+            )
+            assert result.path.read_bytes() == payload
+            assert result.resumed is True
+    finally:
+        server.shutdown()
+
+
 def test_hls_download() -> None:
     seg1 = b"segment-one"
     seg2 = b"segment-two"
@@ -928,6 +1173,47 @@ def test_hls_quality_selection() -> None:
         server.shutdown()
 
 
+def test_hls_byterange_init_and_fallback_merge() -> None:
+    init_data = b"INITDATA"
+    media_data = b"ABCDEFGHIJKLMNOP"
+    playlist = (
+        "#EXTM3U\n"
+        "#EXT-X-TARGETDURATION:6\n"
+        '#EXT-X-MAP:URI="/init.mp4",BYTERANGE="8@0"\n'
+        "#EXT-X-BYTERANGE:4@8\n"
+        "#EXTINF:6.0,\n"
+        "/media.bin\n"
+        "#EXT-X-BYTERANGE:4\n"
+        "#EXTINF:6.0,\n"
+        "/media.bin\n"
+    )
+    base, server = _start_server(
+        {
+            "/playlist.m3u8": playlist.encode("utf-8"),
+            "/init.mp4": init_data,
+            "/media.bin": media_data,
+        }
+    )
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = download_hls(
+                f"{base}/playlist.m3u8",
+                tmp,
+                ffmpeg_path=None,
+                concurrency=2,
+                segment_retries=2,
+            )
+            assert result.output_path is not None
+            assert result.output_path.read_bytes() == b"INITDATAIJKLMNOP"
+            assert (Path(tmp) / "segments" / "init.mp4").read_bytes() == init_data
+            assert (Path(tmp) / "segments" / "seg_000000.ts").read_bytes() == b"IJKL"
+            assert (Path(tmp) / "segments" / "seg_000001.ts").read_bytes() == b"MNOP"
+            concat = (Path(tmp) / "concat.txt").read_text(encoding="utf-8")
+            assert "init.mp4" in concat
+    finally:
+        server.shutdown()
+
+
 def test_dependencies_status() -> None:
     status = check_status()
     for key in (
@@ -941,6 +1227,151 @@ def test_dependencies_status() -> None:
         "ready",
     ):
         assert key in status, f"check_status missing {key}"
+
+
+def test_transcode_profiles_hardware_and_copy() -> None:
+    encoder_text = " Encoders:\n" " V..... libx264\n" " V..... h264_nvenc\n" " A..... aac\n"
+    encoders = parse_encoder_list(encoder_text)
+    assert {"libx264", "h264_nvenc", "aac"}.issubset(encoders)
+    assert select_hardware_encoder("h264", encoders) == "h264_nvenc"
+    assert select_hardware_encoder("h264", encoders, prefer="h264_qsv") is None
+
+    info = MediaInfo(10.0, "mp4", [], video_codec="h264", audio_codec="aac")
+    copy_args = build_ffmpeg_args(
+        "in.mp4",
+        "out.mp4",
+        TranscodeOptions(),
+        info=info,
+        encoders=encoders,
+    )
+    assert copy_args[copy_args.index("-c:v") + 1] == "copy"
+    assert copy_args[copy_args.index("-c:a") + 1] == "copy"
+    assert copy_args[copy_args.index("-movflags") + 1] == "+faststart"
+    assert "-progress" in copy_args
+    assert copy_args[copy_args.index("-progress") + 1] == "pipe:1"
+    assert "-nostats" in copy_args
+
+    reencode_args = build_ffmpeg_args(
+        "in.mp4",
+        "out.mp4",
+        TranscodeOptions(smart_copy=False),
+        info=MediaInfo(10.0, "mp4", [], video_codec="hevc", audio_codec="aac"),
+        encoders=encoders,
+    )
+    assert reencode_args[reencode_args.index("-c:v") + 1] == "libx264"
+    assert "-crf" in reencode_args
+
+    hw_args = build_ffmpeg_args(
+        "in.mp4",
+        "out.mp4",
+        TranscodeOptions(video_codec="libx264", hardware=True, smart_copy=False),
+        info=info,
+        encoders=encoders,
+    )
+    assert hw_args[hw_args.index("-c:v") + 1] == "h264_nvenc"
+    assert "-cq" in hw_args
+    assert "-preset" in hw_args
+
+    audio_args = build_ffmpeg_args(
+        "in.mp4",
+        "out.mp3",
+        TranscodeOptions(audio_only=True, audio_codec="libmp3lame", smart_copy=False),
+        info=info,
+        encoders=encoders,
+    )
+    assert "-vn" in audio_args
+    assert audio_args[audio_args.index("-c:a") + 1] == "libmp3lame"
+    assert transcode_main(["--list-profiles"]) == 0
+
+
+def test_transcode_file_progress_with_fake_ffmpeg() -> None:
+    class _FakeProcess:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.stdout = io.StringIO("out_time_ms=1000000\nspeed=2.5x\n")
+            self.stderr = io.StringIO("")
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = 1
+
+        def wait(self) -> None:
+            pass
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.mp4"
+        src.write_bytes(b"fake")
+        dst = Path(tmp) / "out.mp3"
+        events = []
+        with mock.patch(
+            "ffmpeg_transcoder.subprocess.Popen",
+            return_value=_FakeProcess(),
+        ):
+            transcode_file(
+                src,
+                dst,
+                ffmpeg_path=sys.executable,
+                ffprobe_path="missing-ffprobe",
+                profile="mp3",
+                smart_copy=False,
+                progress=events.append,
+            )
+        assert events
+        assert events[-1].out_time_s == 1.0
+        assert events[-1].speed == "2.5x"
+
+
+def test_transcode_rich_progress_fields() -> None:
+    class _FakeProcess:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.stdout = io.StringIO(
+                "out_time_ms=500000\n"
+                "fps=30.0\n"
+                "bitrate=1234.5kbits/s\n"
+                "total_size=2048\n"
+                "frame=15\n"
+                "progress=continue\n"
+                "speed=2.0x\n"
+            )
+            self.stderr = io.StringIO("")
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = 1
+
+        def wait(self) -> None:
+            pass
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.mp4"
+        src.write_bytes(b"fake")
+        dst = Path(tmp) / "out.mp3"
+        events = []
+        with mock.patch(
+            "ffmpeg_transcoder.subprocess.Popen",
+            return_value=_FakeProcess(),
+        ):
+            transcode_file(
+                src,
+                dst,
+                ffmpeg_path=sys.executable,
+                ffprobe_path="missing-ffprobe",
+                profile="mp3",
+                smart_copy=False,
+                progress=events.append,
+            )
+        assert events
+        transcode_event = next(
+            event for event in events if event.stage == "transcode" and event.state == "continue"
+        )
+        assert transcode_event.fps == 30.0
+        assert transcode_event.bitrate == "1234.5kbits/s"
+        assert transcode_event.output_size == 2048
+        assert transcode_event.frame == 15
+        assert transcode_event.state == "continue"
+        assert events[-1].stage == "finalize"
+        assert events[-1].percent == 1.0
+        assert events[-1].state == "end"
+        assert events[-1].output_size == 2048
 
 
 def test_pipeline_service() -> None:
@@ -1770,6 +2201,550 @@ def test_sidecar_webdata_task() -> None:
         server.shutdown()
 
 
+def test_sidecar_media_probe_endpoint() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = MediaPipelineService(Path(tmp) / "tasks.sqlite", token="test-token")
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(service))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        media_path = Path(tmp) / "video.mp4"
+        media_path.write_bytes(b"fake")
+
+        def auth_request(path: str, data: dict) -> urllib.request.Request:
+            headers = {
+                "Authorization": "Bearer test-token",
+                "Content-Type": "application/json",
+            }
+            return urllib.request.Request(
+                f"{base}{path}",
+                data=json.dumps(data).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+
+        try:
+            try:
+                urllib.request.urlopen(auth_request("/media/probe", {"path": str(media_path)}))
+            except urllib.error.HTTPError as exc:
+                assert exc.code in (200, 404), exc.code
+            try:
+                urllib.request.urlopen(
+                    auth_request("/media/probe", {"path": str(Path(tmp) / "missing.mp4")})
+                )
+                raise AssertionError("missing media file must be rejected")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 400, exc.code
+        finally:
+            server.shutdown()
+            server.server_close()
+            service.close()
+
+
+def test_sidecar_progress_meta_endpoint() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = MediaPipelineService(Path(tmp) / "tasks.sqlite", token="test-token")
+        task = service.queue.enqueue("download", {"url": "x", "dest": "y"})
+        meta = {
+            "downloaded": 4096,
+            "total": 102400,
+            "percent": 0.04,
+            "speed": 8192.0,
+            "eta_s": 12.0,
+            "chunks_done": 1,
+            "chunks_total": 8,
+        }
+        service._publish_progress(task.id, "download", 0.04, meta, message="chunk 1/8")
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(service))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            request = urllib.request.Request(
+                f"{base}/tasks/{task.id}/progress",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            with urllib.request.urlopen(request) as response:
+                snapshot = json.loads(response.read().decode("utf-8"))
+            assert snapshot["progress_meta"] == meta
+            assert snapshot["stage"] == "download"
+            assert snapshot["events"][0]["meta"] == meta
+            request = urllib.request.Request(
+                f"{base}/tasks/{task.id}/events",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            with urllib.request.urlopen(request) as response:
+                events = json.loads(response.read().decode("utf-8"))
+            assert events["events"][0]["stage"] == "download"
+            assert events["next"] == 1
+        finally:
+            server.shutdown()
+            server.server_close()
+            service.close()
+
+
+def test_sidecar_long_poll_events() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = MediaPipelineService(Path(tmp) / "tasks.sqlite", token="test-token")
+        task = service.queue.enqueue("download", {"url": "x", "dest": "y"})
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(service))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+
+        def emit_event() -> None:
+            time.sleep(0.15)
+            service._publish_progress(
+                task.id,
+                "download",
+                0.5,
+                {"downloaded": 512, "total": 1024},
+                message="long-poll event",
+            )
+
+        emitter = threading.Thread(target=emit_event, daemon=True)
+        emitter.start()
+        try:
+            request = urllib.request.Request(
+                f"{base}/tasks/{task.id}/events?after=0&timeout=3",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            assert payload["events"], "long poll must wait for a new event"
+            assert payload["events"][0]["stage"] == "download"
+            assert payload["events"][0]["meta"]["total"] == 1024
+        finally:
+            emitter.join()
+            server.shutdown()
+            server.server_close()
+            service.close()
+
+
+def test_sidecar_transcode_payload_options() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = MediaPipelineService(Path(tmp) / "tasks.sqlite")
+        captured: dict = {}
+
+        def fake_transcode_file(*args: object, **kwargs: object) -> Path:
+            captured.update(kwargs)
+            return Path(tmp) / "out.mp3"
+
+        with mock.patch(
+            "ffmpeg_transcoder.transcode_file",
+            side_effect=fake_transcode_file,
+        ):
+            task = service.queue.enqueue(
+                "transcode",
+                {
+                    "src": str(Path(tmp) / "in.mp4"),
+                    "dst": str(Path(tmp) / "out.mp3"),
+                    "profile": "mp3",
+                    "hardware": True,
+                    "smart_copy": False,
+                    "extra_args": ["-map", "0:a"],
+                    "start_time": "00:01:00",
+                    "duration": "120",
+                    "threads": 4,
+                },
+            )
+            result = service._run_task(task)
+        assert result is not None
+        assert captured["profile"] == "mp3"
+        assert captured["hardware"] is True
+        assert captured["smart_copy"] is False
+        assert captured["extra_args"] == ["-map", "0:a"]
+        assert captured["start_time"] == "00:01:00"
+        assert captured["duration"] == "120"
+        assert captured["threads"] == 4
+        service.close()
+
+
+def test_format_catalog_integrates_profiles() -> None:
+    assert lookup_format(".MP4") is not None
+    assert lookup_format("jpg") is not None
+    assert lookup_format("mp4").profile == "mp4"
+    assert "video" in formats_by_category("video")[0].category
+    categories = {item["id"] for item in catalog_payload()["categories"]}
+    assert {
+        "video",
+        "audio",
+        "image",
+        "subtitle",
+        "document",
+        "data",
+        "archive",
+    }.issubset(categories)
+    assert engine_targets("stdlib")
+    for spec in FORMAT_CATALOG:
+        if spec.engine == "ffmpeg" and spec.profile:
+            assert spec.profile in TRANSCODE_PROFILES, spec.profile
+    for extension, profile in EXTENSION_PROFILE.items():
+        assert profile in TRANSCODE_PROFILES, extension
+    payload = catalog_payload()
+    assert payload["count"] == len(FORMAT_CATALOG)
+    assert len(payload["formats"]) == payload["count"]
+
+
+def test_file_converter_text_archive_subtitle_batch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        md = root / "a.md"
+        md.write_text("# Hello\n\nWorld\n", encoding="utf-8")
+        html_path = root / "a.html"
+        result = convert_file(md, html_path)
+        assert result.engine == "stdlib"
+        assert "<h1>Hello</h1>" in html_path.read_text(encoding="utf-8")
+
+        csv_path = root / "data.csv"
+        csv_path.write_text("id,name\n1,Alpha\n", encoding="utf-8")
+        json_path = root / "data.json"
+        convert_file(csv_path, json_path)
+        assert json.loads(json_path.read_text(encoding="utf-8"))[0]["name"] == "Alpha"
+
+        srt_path = root / "sub.srt"
+        srt_path.write_text(
+            "1\n00:00:01,000 --> 00:00:02,000\nHello\n",
+            encoding="utf-8",
+        )
+        vtt_path = root / "sub.vtt"
+        convert_file(srt_path, vtt_path)
+        assert "00:00:01.000" in vtt_path.read_text(encoding="utf-8")
+
+        zip_path = root / "bundle.zip"
+        convert_file(csv_path, zip_path)
+        extracted = root / "extracted"
+        written = extract_archive(zip_path, extracted)
+        assert written and (extracted / csv_path.name).exists()
+
+        md2 = root / "b.md"
+        md2.write_text("## Second\n\nBody\n", encoding="utf-8")
+        events: list[BatchConvertProgress] = []
+        summary = convert_many(
+            [md, md2],
+            root / "batch",
+            "html",
+            progress=events.append,
+        )
+        assert len(summary["results"]) == 2
+        assert events and isinstance(events[0], BatchConvertProgress)
+        assert events[-1].done == 2
+        assert events[-1].percent == 1.0
+
+
+def test_file_converter_ffmpeg_dispatch_and_optional() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.mp4"
+        src.write_bytes(b"fake")
+        captured: dict = {}
+
+        def fake_transcode(*args: object, **kwargs: object) -> Path:
+            captured.update(kwargs)
+            dst = Path(args[1])
+            dst.write_bytes(b"out")
+            return dst
+
+        with mock.patch(
+            "ffmpeg_transcoder.transcode_file",
+            side_effect=fake_transcode,
+        ):
+            result = convert_file(src, Path(tmp) / "out.mp3")
+        assert result.engine == "ffmpeg"
+        assert captured["profile"] == "mp3"
+
+        md = Path(tmp) / "doc.md"
+        md.write_text("# Doc\n", encoding="utf-8")
+        try:
+            convert_file(md, Path(tmp) / "doc.pdf")
+            raise AssertionError("optional PDF conversion must be unavailable by default")
+        except ConversionUnavailable:
+            pass
+
+
+def test_download_checkpoint_entity_and_hash() -> None:
+    import hashlib
+
+    payload = bytes(range(256)) * 4
+    base, server = _start_server({"/video.bin": payload})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "video.bin"
+            stale = _build_chunk_map(
+                len(payload),
+                1024,
+                entity_tag='"old"',
+                last_modified="Thu, 01 Jan 2024 00:00:00 GMT",
+            )
+            checkpoint = dest.with_name(f"{dest.name}.chunks.json")
+            checkpoint.write_text(json.dumps(stale), encoding="utf-8")
+            assert (
+                _load_chunk_map(
+                    dest,
+                    len(payload),
+                    entity_tag=f'"v1-{len(payload)}"',
+                    last_modified="Wed, 01 Jan 2025 00:00:00 GMT",
+                )
+                is None
+            )
+            expected = hashlib.sha256(payload).hexdigest()
+            result = download_file(
+                f"{base}/video.bin",
+                dest,
+                session=MediaSession(),
+                chunk_size=37,
+                concurrency=3,
+                expected_sha256=expected,
+            )
+            assert result.path.read_bytes() == payload
+            assert result.content_type == "application/octet-stream"
+            assert result.filename == "video.bin"
+            try:
+                download_file(
+                    f"{base}/video.bin",
+                    dest.with_name("bad.bin"),
+                    session=MediaSession(),
+                    expected_sha256="0" * 64,
+                )
+                raise AssertionError("hash mismatch must raise")
+            except DownloadHashError:
+                pass
+    finally:
+        server.shutdown()
+
+
+def test_download_batch_progress() -> None:
+    first = b"a" * 1024
+    second = b"b" * 2048
+    base, server = _start_server({"/one.bin": first, "/two.bin": second})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            result = download_batch(
+                [f"{base}/one.bin", f"{base}/two.bin"],
+                Path(tmp),
+                session=MediaSession(),
+                chunk_size=64,
+                concurrency=2,
+                progress=events.append,
+            )
+            assert len(result.paths) == 2
+            assert result.total_bytes == len(first) + len(second)
+            assert result.downloaded_bytes == len(first) + len(second)
+            assert events and events[0].stage == "preflight"
+            assert events[-1].done == 2
+            assert events[-1].percent == 1.0
+            assert (Path(tmp) / "one.bin").read_bytes() == first
+            assert (Path(tmp) / "two.bin").read_bytes() == second
+    finally:
+        server.shutdown()
+
+
+def test_sidecar_formats_and_convert_task() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = MediaPipelineService(Path(tmp) / "tasks.sqlite", token="test-token")
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(service))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+
+        def request(path: str) -> dict:
+            req = urllib.request.Request(
+                f"{base}{path}",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            with urllib.request.urlopen(req) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        try:
+            formats = request("/formats")
+            assert formats["count"] == len(FORMAT_CATALOG)
+            assert any(category["id"] == "video" for category in formats["categories"])
+
+            captured: dict = {}
+
+            def fake_convert(*args: object, **kwargs: object) -> ConvertResult:
+                captured.update(kwargs)
+                return ConvertResult(Path(tmp) / "out.mp3", "ffmpeg", 1, 1)
+
+            with mock.patch(
+                "file_converter.convert_file",
+                side_effect=fake_convert,
+            ):
+                task = service.queue.enqueue(
+                    "convert",
+                    {
+                        "src": str(Path(tmp) / "in.mp4"),
+                        "dst": str(Path(tmp) / "out.mp3"),
+                        "profile": "mp3",
+                    },
+                )
+                result = service._run_task(task)
+            assert result == str(Path(tmp) / "out.mp3")
+            assert captured["profile"] == "mp3"
+
+            captured2: dict = {}
+
+            def fake_many(*args: object, **kwargs: object) -> dict:
+                captured2.update(kwargs)
+                return {
+                    "results": [],
+                    "total_input_bytes": 10,
+                    "total_output_bytes": 8,
+                    "elapsed_s": 0.1,
+                    "average_speed": 80.0,
+                }
+
+            with mock.patch(
+                "file_converter.convert_many",
+                side_effect=fake_many,
+            ):
+                task = service.queue.enqueue(
+                    "batch-convert",
+                    {
+                        "srcs": ["a.mp3", "b.mp3"],
+                        "output_dir": str(Path(tmp) / "out"),
+                        "target": "mp3",
+                    },
+                )
+                summary = json.loads(service._run_task(task))
+            assert summary["total_input_bytes"] == 10
+            assert captured2["target_ext"] == "mp3"
+
+            captured3: dict = {}
+
+            def fake_batch(*args: object, **kwargs: object) -> BatchDownloadResult:
+                captured3.update(kwargs)
+                return BatchDownloadResult(
+                    paths=[Path(tmp) / "a.bin"],
+                    total_bytes=10,
+                    downloaded_bytes=10,
+                    elapsed_s=0.1,
+                    average_speed=100.0,
+                )
+
+            with mock.patch(
+                "media_pipeline_service.download_batch",
+                side_effect=fake_batch,
+            ):
+                task = service.queue.enqueue(
+                    "batch-download",
+                    {
+                        "urls": ["https://example.com/a.bin"],
+                        "dest_dir": str(Path(tmp) / "downloads"),
+                    },
+                )
+                summary = json.loads(service._run_task(task))
+            assert summary["total_bytes"] == 10
+            assert captured3["task_id"] == task.id
+        finally:
+            server.shutdown()
+            server.server_close()
+            service.close()
+
+
+def test_builtin_dependency_manager_archive_install() -> None:
+    import hashlib
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("bin/tool.bin", b"tool")
+    payload = buffer.getvalue()
+    digest = hashlib.sha256(payload).hexdigest()
+    base, server = _start_server({"/tool.zip": payload})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp) / "runtime"
+            spec = DependencySpec(
+                name="tool",
+                kind="archive",
+                url=f"{base}/tool.zip",
+                version="1.0",
+                sha256=digest,
+                bin_names=("tool.bin",),
+            )
+            events: list[tuple[str, float | None, str]] = []
+            manager = BuiltinDependencyManager(
+                runtime,
+                [spec],
+                progress=lambda stage, percent, message: events.append((stage, percent, message)),
+            )
+            before = manager.check_status()
+            assert before["items"][0]["installed"] is False
+            result = manager.install(install=True)
+            assert result["ready"] is True
+            assert (runtime / "tool" / "bin" / "tool.bin").is_file()
+            assert manager.environment()["tool"]["paths"]
+            assert any("downloaded" in message for _, _, message in events)
+    finally:
+        server.shutdown()
+
+
+def test_builtin_dependency_manager_portable_and_sha_mismatch() -> None:
+    import hashlib
+
+    payload = b"portable-tool"
+    digest = hashlib.sha256(payload).hexdigest()
+    base, server = _start_server({"/tool.exe": payload})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp) / "runtime"
+            spec = DependencySpec(
+                name="tool",
+                kind="portable",
+                url=f"{base}/tool.exe",
+                sha256=digest,
+                bin_names=("tool.bin",),
+                download_name="tool",
+            )
+            manager = BuiltinDependencyManager(
+                runtime,
+                [spec],
+                progress=lambda stage, percent, message: None,
+            )
+            result = manager.install(install=True)
+            assert result["items"][0]["paths"][0].endswith("tool.bin")
+
+            bad_spec = DependencySpec(
+                name="bad",
+                kind="portable",
+                url=f"{base}/tool.exe",
+                sha256="0" * 64,
+                bin_names=("bad.bin",),
+                download_name="bad",
+            )
+            bad_manager = BuiltinDependencyManager(
+                runtime,
+                [bad_spec],
+                progress=lambda stage, percent, message: None,
+            )
+            try:
+                bad_manager.install(install=True)
+                raise AssertionError("sha256 mismatch must fail the install")
+            except DependencyError:
+                pass
+            assert not (runtime / "downloads" / "bad.exe").exists()
+    finally:
+        server.shutdown()
+
+
+def test_builtin_dependency_manager_check_only() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        runtime = Path(tmp) / "runtime"
+        spec = DependencySpec(
+            name="tool",
+            kind="archive",
+            url="https://example.invalid/tool.zip",
+            bin_names=("tool.bin",),
+        )
+        manager = BuiltinDependencyManager(runtime, [spec])
+        result = manager.install(install=False)
+        assert result["ready"] is False
+        assert not runtime.exists()
+        empty = BuiltinDependencyManager(runtime, [])
+        assert empty.check_status()["ready"] is True
+
+
 def test_captcha_ocr_fallback() -> None:
     solver = AutoCaptchaSolver(_FakeCaptchaSolver(), ocr_solver=_FailingOcrSolver())
     challenge = CaptchaChallenge(kind="image", image_url=None)
@@ -1964,6 +2939,7 @@ def run() -> int:
     tests = [
         test_task_queue,
         test_task_queue_delayed_retry,
+        test_task_queue_progress_meta,
         test_media_parser,
         test_deep_page_parser,
         test_browser_network_capture,
@@ -1984,10 +2960,21 @@ def run() -> int:
         test_fingerprint_generate_stable,
         test_page_analyzer_cli,
         test_chunked_download,
+        test_speed_tracker_and_tuning,
+        test_download_adaptive_concurrency,
+        test_download_content_range_fallback,
         test_download_without_content_length,
+        test_download_progress_total_size_and_meta,
+        test_download_auto_chunk_sizing,
+        test_speed_limiter_throttles,
+        test_download_speed_limit_integration,
         test_hls_download,
         test_hls_quality_selection,
+        test_hls_byterange_init_and_fallback_merge,
         test_dependencies_status,
+        test_transcode_profiles_hardware_and_copy,
+        test_transcode_file_progress_with_fake_ffmpeg,
+        test_transcode_rich_progress_fields,
         test_pipeline_service,
         test_pipeline_bad_requests,
         test_crawl_task,
@@ -2011,6 +2998,19 @@ def run() -> int:
         test_data_processor_join,
         test_web_data_pipeline_self_test,
         test_sidecar_webdata_task,
+        test_sidecar_media_probe_endpoint,
+        test_sidecar_progress_meta_endpoint,
+        test_sidecar_long_poll_events,
+        test_sidecar_transcode_payload_options,
+        test_format_catalog_integrates_profiles,
+        test_file_converter_text_archive_subtitle_batch,
+        test_file_converter_ffmpeg_dispatch_and_optional,
+        test_download_checkpoint_entity_and_hash,
+        test_download_batch_progress,
+        test_sidecar_formats_and_convert_task,
+        test_builtin_dependency_manager_archive_install,
+        test_builtin_dependency_manager_portable_and_sha_mismatch,
+        test_builtin_dependency_manager_check_only,
         test_captcha_ocr_fallback,
         test_task_queue_run_after,
         test_proxy_pool_rotation_and_cooldown,
