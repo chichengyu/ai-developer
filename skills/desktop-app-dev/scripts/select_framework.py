@@ -78,7 +78,9 @@ DIMS = (
     "win_x64_arch",
     "win_arm64_arch",
     "win_x86_arch",
+    "macos_x64_arch",
     "macos_arm64_arch",
+    "linux_x64_arch",
     "linux_arm64_arch",
     "exe_size_small",
     "exe_size_tiny",
@@ -109,7 +111,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 1.0,
+        "macos_x64_arch": -1.0,
         "macos_arm64_arch": -1.0,
+        "linux_x64_arch": -1.0,
         "linux_arm64_arch": -1.0,
         "exe_size_small": 0.0,
         "exe_size_tiny": -0.5,
@@ -138,7 +142,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 1.0,
+        "macos_x64_arch": -1.0,
         "macos_arm64_arch": -1.0,
+        "linux_x64_arch": -1.0,
         "linux_arm64_arch": -1.0,
         "exe_size_small": 0.5,
         "exe_size_tiny": 1.0,
@@ -167,7 +173,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": -1.0,
         "macos_arm64_arch": -1.0,
+        "linux_x64_arch": -1.0,
         "linux_arm64_arch": -1.0,
         "exe_size_small": 0.0,
         "exe_size_tiny": -0.8,
@@ -196,7 +204,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 1.0,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 0.8,
         "exe_size_small": 0.0,
         "exe_size_tiny": -0.5,
@@ -225,7 +235,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 0.0,
         "linux_arm64_arch": 0.0,
         "exe_size_small": -0.5,
         "exe_size_tiny": -1.0,
@@ -254,7 +266,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 1.0,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 1.0,
         "exe_size_small": 0.0,
         "exe_size_tiny": -0.5,
@@ -283,7 +297,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 1.0,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 1.0,
         "exe_size_small": -0.5,
         "exe_size_tiny": -1.0,
@@ -312,7 +328,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 0.3,
         "win_arm64_arch": 0.0,
         "win_x86_arch": 0.3,
+        "macos_x64_arch": 0.5,
         "macos_arm64_arch": 0.5,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 1.0,
         "exe_size_small": -0.5,
         "exe_size_tiny": -1.0,
@@ -341,7 +359,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 1.0,
         "exe_size_small": 0.9,
         "exe_size_tiny": 1.0,
@@ -370,7 +390,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 0.8,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 1.0,
         "exe_size_small": -1.0,
         "exe_size_tiny": -1.0,
@@ -399,7 +421,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 1.0,
         "exe_size_small": 1.0,
         "exe_size_tiny": 1.0,
@@ -428,7 +452,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 1.0,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 1.0,
         "exe_size_small": 0.5,
         "exe_size_tiny": 0.0,
@@ -457,7 +483,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 1.0,
         "win_x86_arch": 1.0,
+        "macos_x64_arch": -1.0,
         "macos_arm64_arch": -1.0,
+        "linux_x64_arch": -1.0,
         "linux_arm64_arch": -1.0,
         "exe_size_small": 1.0,
         "exe_size_tiny": 1.0,
@@ -486,7 +514,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 0.8,
         "exe_size_small": 0.9,
         "exe_size_tiny": 0.9,
@@ -515,7 +545,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 1.0,
         "linux_arm64_arch": 0.8,
         "exe_size_small": 0.8,
         "exe_size_tiny": 0.7,
@@ -544,7 +576,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 0.5,
         "win_arm64_arch": 0.3,
         "win_x86_arch": 0.3,
+        "macos_x64_arch": 0.5,
         "macos_arm64_arch": 0.5,
+        "linux_x64_arch": 0.8,
         "linux_arm64_arch": 0.7,
         "exe_size_small": 1.0,
         "exe_size_tiny": 1.0,
@@ -573,7 +607,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 0.8,
+        "macos_x64_arch": -1.0,
         "macos_arm64_arch": -1.0,
+        "linux_x64_arch": -1.0,
         "linux_arm64_arch": -1.0,
         "exe_size_small": 1.0,
         "exe_size_tiny": 1.0,
@@ -602,7 +638,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.5,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": 0.8,
         "macos_arm64_arch": 0.7,
+        "linux_x64_arch": 0.8,
         "linux_arm64_arch": 0.7,
         "exe_size_small": -0.7,
         "exe_size_tiny": -1.0,
@@ -631,7 +669,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.3,
         "win_x86_arch": 0.8,
+        "macos_x64_arch": 0.7,
         "macos_arm64_arch": 0.5,
+        "linux_x64_arch": 0.7,
         "linux_arm64_arch": 0.5,
         "exe_size_small": -0.5,
         "exe_size_tiny": -1.0,
@@ -660,7 +700,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 0.5,
         "win_arm64_arch": 0.0,
         "win_x86_arch": 0.3,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 0.3,
         "linux_arm64_arch": 0.0,
         "exe_size_small": 0.8,
         "exe_size_tiny": 0.8,
@@ -689,7 +731,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 0.5,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 0.8,
         "linux_arm64_arch": 0.8,
         "exe_size_small": -0.3,
         "exe_size_tiny": -1.0,
@@ -718,7 +762,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 0.8,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 0.9,
         "linux_arm64_arch": 0.8,
         "exe_size_small": 1.0,
         "exe_size_tiny": 1.0,
@@ -747,7 +793,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.8,
         "win_x86_arch": 0.8,
+        "macos_x64_arch": 1.0,
         "macos_arm64_arch": 1.0,
+        "linux_x64_arch": 0.9,
         "linux_arm64_arch": 0.8,
         "exe_size_small": 1.0,
         "exe_size_tiny": 1.0,
@@ -776,7 +824,9 @@ FRAMEWORKS: dict[str, dict[str, float]] = {
         "win_x64_arch": 1.0,
         "win_arm64_arch": 0.3,
         "win_x86_arch": 0.8,
+        "macos_x64_arch": 0.7,
         "macos_arm64_arch": 0.5,
+        "linux_x64_arch": 0.7,
         "linux_arm64_arch": 0.5,
         "exe_size_small": -0.5,
         "exe_size_tiny": -1.0,
@@ -833,6 +883,13 @@ HUMAN_DIM: dict[str, str] = {
     "windows_support": "Windows support",
     "macos_support": "macOS support",
     "linux_support": "Linux support",
+    "win_x64_arch": "Windows x64 support",
+    "win_arm64_arch": "Windows arm64 support",
+    "win_x86_arch": "Windows x86 support",
+    "macos_x64_arch": "macOS x64 support",
+    "macos_arm64_arch": "macOS arm64 support",
+    "linux_x64_arch": "Linux x64 support",
+    "linux_arm64_arch": "Linux arm64 support",
     "exe_size_small": "small EXE (< 30 MB)",
     "exe_size_tiny": "tiny EXE (< 5 MB)",
     "cold_start_fast": "fast cold start",
@@ -923,7 +980,9 @@ def derive_weights(req):
             if want_win:
                 w["win_x64_arch"] = 1.0
             if want_mac:
-                w["macos_arm64_arch"] = 1.0
+                w["macos_x64_arch"] = 1.0
+            if want_lin:
+                w["linux_x64_arch"] = 1.0
         elif arch == "arm64":
             if want_win:
                 w["win_arm64_arch"] = 1.0
@@ -1257,6 +1316,14 @@ def self_test():
         assert bom_loaded.get("target_os") == [["windows", "x64"]]
         print("  [OK]   bom json brief load")
 
+        arch_req = Requirements.from_dict({"target_os": [["macos", "x64"], ["linux", "x64"]]})
+        arch_weights = derive_weights(arch_req)
+        assert arch_weights["macos_x64_arch"] == 1.0
+        assert arch_weights["linux_x64_arch"] == 1.0
+        assert arch_weights["macos_arm64_arch"] == 0.0
+        assert arch_weights["linux_arm64_arch"] == 0.0
+        print("  [OK]   macos/linux x64 arch weights")
+
     invariant_errors = validate_tables()
     for error in invariant_errors:
         print(f"  [FAIL] {error}")
@@ -1344,7 +1411,7 @@ def self_test():
         scores = score_all(req)
         winner = scores[0].name
         ok = winner == expected
-        marker = "OK  " if ok else "FAIL"
+        marker = "OK" if ok else "FAIL"
         print(f"  [{marker}] case {i + 1}: expected {expected!r:24} got {winner!r}")
         if not ok:
             failures += 1

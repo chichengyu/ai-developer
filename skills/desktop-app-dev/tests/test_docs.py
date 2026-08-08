@@ -44,6 +44,31 @@ def main() -> int:
     skill_text = "\n".join(skill)
     for uid in ui_ids:
         check(f"| {uid} |" in skill_text, f"SKILL.md missing {uid} table row")
+    code_ids = [f"CODE-{i:02d}" for i in range(1, 6)]
+    check(
+        sum(
+            1 for line in skill if line == "## 代码开发硬性要求（minimal-change hard requirements）"
+        )
+        == 1,
+        "SKILL.md must contain exactly one 代码开发硬性要求 heading",
+    )
+    check(
+        "CODE-01..CODE-05" in skill_text
+        and "references/minimal_change_requirements.md" in skill_text,
+        "SKILL.md missing CODE-01..CODE-05 minimal-change rules",
+    )
+    check(
+        "MUST open `references/ui_hard_requirements.md`" in skill_text,
+        "SKILL.md missing mandatory open for ui_hard_requirements.md",
+    )
+    check(
+        "MUST open `references/minimal_change_requirements.md`" in skill_text,
+        "SKILL.md missing mandatory open for minimal_change_requirements.md",
+    )
+    check(
+        "CODE-01..CODE-05 item or waiver" in skill_text,
+        "SKILL.md Step 0 must record CODE-01..CODE-05 item or waiver",
+    )
 
     for md in ROOT.rglob("*.md"):
         text = md.read_text(encoding="utf-8")
@@ -57,6 +82,15 @@ def main() -> int:
                 continue
             if not (ROOT / ref).exists():
                 check(False, f"missing relative reference: {ref} in {md.relative_to(ROOT)}")
+
+    for md in ROOT.rglob("*.md"):
+        headings = [
+            line.strip()
+            for line in md.read_text(encoding="utf-8").splitlines()
+            if line.startswith("## ")
+        ]
+        duplicates = sorted({h for h in headings if headings.count(h) > 1})
+        check(not duplicates, f"{md.relative_to(ROOT)} has duplicate ## headings: {duplicates}")
 
     ui_ref = ROOT / "references" / "ui_hard_requirements.md"
     check(ui_ref.exists(), "missing references/ui_hard_requirements.md")
@@ -88,12 +122,30 @@ def main() -> int:
             "https://m3.material.io/theme-builder",
         ]:
             check(url in ui_text, f"ui_hard_requirements.md missing theme URL: {url}")
+    code_ref = ROOT / "references" / "minimal_change_requirements.md"
+    check(code_ref.exists(), "missing references/minimal_change_requirements.md")
+    if code_ref.exists():
+        code_text = code_ref.read_text(encoding="utf-8")
+        for cid in code_ids:
+            check(
+                f"## {cid} " in code_text,
+                f"minimal_change_requirements.md missing {cid} heading",
+            )
+        for term in ["SKILL.md", "requirements.md", "回归验证", "diff 保持最小"]:
+            check(
+                term in code_text,
+                f"minimal_change_requirements.md missing required term: {term}",
+            )
 
     req_template = (ROOT / "templates" / "requirements_checklist.md").read_text(encoding="utf-8")
     for uid in ui_ids:
         check(f"| {uid} |" in req_template, f"requirements_checklist.md missing {uid} row")
     release_text = (ROOT / "templates" / "release_checklist.md").read_text(encoding="utf-8")
     check("UI-01..UI-18" in release_text, "release_checklist.md missing UI-01..UI-18 release gate")
+    check(
+        "single distributable artifact" in release_text and "Idle memory" in release_text,
+        "release_checklist.md missing single-file / idle-memory release gates",
+    )
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     index_text = (ROOT / "INDEX.md").read_text(encoding="utf-8")
     check(
@@ -103,6 +155,23 @@ def main() -> int:
     check(
         "references/ui_hard_requirements.md" in index_text,
         "INDEX.md missing ui_hard_requirements.md link",
+    )
+    check(
+        "CODE-01..CODE-05" in req_template
+        and all(f"| {cid} |" in req_template for cid in code_ids),
+        "requirements_checklist.md missing CODE-01..CODE-05 rows",
+    )
+    check(
+        "CODE-01..CODE-05" in release_text,
+        "release_checklist.md missing CODE-01..CODE-05 release gate",
+    )
+    check(
+        "CODE-01..CODE-05" in readme_text,
+        "README.md missing CODE-01..CODE-05 minimal-change rules",
+    )
+    check(
+        "CODE-01..CODE-05" in index_text,
+        "INDEX.md missing CODE-01..CODE-05 minimal-change rules",
     )
     check("SendInput(2" not in skill_text, "SKILL.md still documents batched SendInput(2)")
     check("mobile-app-dev-ios" not in skill_text, "SKILL.md references removed mobile skill name")
@@ -127,7 +196,10 @@ def main() -> int:
         "INDEX.md missing source preservation docs",
     )
     check("find_python.ps1" in readme_text, "README.md layout missing find_python.ps1")
-    check("77 / 77" in skill_text, "SKILL.md stale Windows smoke count")
+    check(
+        re.search(r"\(\d+\s*/\s*\d+ currently pass", skill_text) is not None,
+        "SKILL.md missing Windows smoke count",
+    )
     skill_size = (ROOT / "SKILL.md").stat().st_size
     check(
         skill_size <= 25 * 1024,
@@ -136,7 +208,7 @@ def main() -> int:
     check("usesystem CMake" not in index_text, "INDEX.md has usesystem CMake typo")
 
     reference_files = sorted(p.name for p in (ROOT / "references").glob("*.md"))
-    check(len(reference_files) == 11, f"references count = {len(reference_files)}, expected 11")
+    check(len(reference_files) == 14, f"references count = {len(reference_files)}, expected 14")
     for ref_name in reference_files:
         check(
             f"references/{ref_name}" in skill_text,
@@ -197,6 +269,30 @@ def main() -> int:
         "## Python / GTK (PyGObject)" in matrix_text,
         "framework_matrix.md missing Python GTK section",
     )
+    dist_text = (ROOT / "references" / "distribution_playbook.md").read_text(encoding="utf-8")
+    for term in [
+        "Single-file, zero-runtime, small footprint",
+        "NativeAOT",
+        "PyInstaller",
+        "CARGO_PROFILE_RELEASE_OPT_LEVEL",
+        "compression",
+        "Idle memory",
+        "no runtime",
+        "-c.compression=maximum",
+        "--no-translations",
+    ]:
+        check(
+            term in dist_text,
+            f"distribution_playbook.md missing required term: {term}",
+        )
+    check(
+        "tiny single-file portable EXE" in readme_text,
+        "README.md missing tiny single-file packaging recipe",
+    )
+    check(
+        "tiny single-file EXE" in index_text,
+        "INDEX.md missing tiny single-file packaging section",
+    )
 
     media_ref = ROOT / "references" / "media_acquisition_playbook.md"
     check(media_ref.exists(), "missing references/media_acquisition_playbook.md")
@@ -219,6 +315,8 @@ def main() -> int:
     for script_name in [
         "media_session.py",
         "media_parser.py",
+        "page_data_parser.py",
+        "scrape_guard.py",
         "media_downloader.py",
         "hls_downloader.py",
         "captcha_solver.py",
@@ -229,11 +327,100 @@ def main() -> int:
         "media_dependencies.py",
         "media_pipeline_service.py",
         "setup_media_dependencies.ps1",
+        "api_client.py",
+        "data_processor.py",
+        "web_data_pipeline.py",
+        "api_analyzer.py",
+        "proxy_pool.py",
+        "account_manager.py",
+        "task_scheduler.py",
+        "notifier.py",
+        "security_detector.py",
+        "cloudflare_challenge.py",
+        "deep_crawler.py",
     ]:
         check(
             (ROOT / "scripts" / script_name).exists(),
             f"missing scripts/{script_name}",
         )
+    web_data_ref = ROOT / "references" / "web_data_pipeline_playbook.md"
+    check(web_data_ref.exists(), "missing references/web_data_pipeline_playbook.md")
+    if web_data_ref.exists():
+        web_data_text = web_data_ref.read_text(encoding="utf-8")
+        for term in [
+            "CAPTCHA",
+            "fingerprint",
+            "api_client.py",
+            "data_processor.py",
+            "web_data_pipeline.py",
+            "aggregate",
+            "Compliance",
+            "manifest",
+            "join",
+            "progress",
+            "proxy_pool.py",
+            "account_manager.py",
+            "task_scheduler.py",
+            "notifier.py",
+            "security_detector.py",
+            "cloudflare_challenge.py",
+            "deep_crawler.py",
+            "Cloudflare",
+            "cf_clearance",
+            "turnstile",
+            "sitemap",
+            "auto_handle",
+            "skip_blocked",
+        ]:
+            check(
+                term in web_data_text,
+                f"web_data_pipeline_playbook.md missing required term: {term}",
+            )
+    for doc_name, doc_text in (
+        ("SKILL.md", skill_text),
+        ("README.md", readme_text),
+        ("INDEX.md", index_text),
+    ):
+        for script_name in (
+            "api_client.py",
+            "data_processor.py",
+            "web_data_pipeline.py",
+            "proxy_pool.py",
+            "account_manager.py",
+            "task_scheduler.py",
+            "notifier.py",
+            "security_detector.py",
+            "cloudflare_challenge.py",
+            "deep_crawler.py",
+        ):
+            check(
+                script_name in doc_text,
+                f"{doc_name} missing {script_name} reference",
+            )
+        check(
+            "threading_playbook.md" in doc_text,
+            f"{doc_name} missing threading_playbook.md reference",
+        )
+    threading_ref = ROOT / "references" / "threading_playbook.md"
+    check(threading_ref.exists(), "missing references/threading_playbook.md")
+    if threading_ref.exists():
+        threading_text = threading_ref.read_text(encoding="utf-8")
+        for term in [
+            "UI thread affinity",
+            "cooperative cancellation",
+            "worker pool",
+            "Graceful shutdown",
+            "Anti-patterns",
+            "threading_",
+            "Dispatcher",
+            "idle_add",
+            "RunSafe",
+            "ReceivePort",
+        ]:
+            check(
+                term in threading_text,
+                f"threading_playbook.md missing required term: {term}",
+            )
     clients_ref = ROOT / "references" / "media_pipeline_clients.md"
     check(clients_ref.exists(), "missing references/media_pipeline_clients.md")
     if clients_ref.exists():
@@ -292,9 +479,14 @@ def main() -> int:
     window_enum = list((ROOT / "scripts").glob("window_enum*"))
     check(len(examples) == 8, f"examples count = {len(examples)}, expected 8")
     check(len(build_ps1) == 14, f"build_*.ps1 count = {len(build_ps1)}, expected 14")
-    check(len(threading) == 7, f"threading_* count = {len(threading)}, expected 7")
+    check(len(threading) == 30, f"threading_* count = {len(threading)}, expected 30")
     check(len(sendinput) == 11, f"sendinput_* count = {len(sendinput)}, expected 11")
     check(len(window_enum) == 11, f"window_enum* count = {len(window_enum)}, expected 11")
+    for py_script in sorted((ROOT / "scripts").glob("*.py")):
+        check(
+            "__main__" in py_script.read_text(encoding="utf-8"),
+            f"{py_script.name} missing __main__ block",
+        )
     find_python_text = (ROOT / "scripts" / "find_python.ps1").read_text(encoding="utf-8")
     check("$env:PYTHON" in find_python_text, "find_python.ps1 missing PYTHON env support")
     check(
@@ -336,6 +528,10 @@ def main() -> int:
         len(framework_keys) == 24, f"selector FRAMEWORKS count = {len(framework_keys)}, expected 24"
     )
     check("walk" in framework_keys, "selector missing walk framework")
+    check(
+        'w["macos_x64_arch"]' in selector_text and 'w["linux_x64_arch"]' in selector_text,
+        "selector derive_weights must map macOS/Linux x64 architecture weights",
+    )
 
     dim_nodes = [
         node.value.elts
@@ -346,7 +542,11 @@ def main() -> int:
         and isinstance(node.value, ast.Tuple)
     ]
     dims = [elt.value for elt in dim_nodes[0] if isinstance(elt, ast.Constant)] if dim_nodes else []
-    check(len(dims) == 27, f"selector DIMS count = {len(dims)}, expected 27")
+    check(len(dims) == 29, f"selector DIMS count = {len(dims)}, expected 29")
+    check(
+        "macos_x64_arch" in dims and "linux_x64_arch" in dims,
+        "selector DIMS missing macOS/Linux x64 architecture dimensions",
+    )
     if framework_dict_node is not None and dims:
         dim_set = set(dims)
 
@@ -443,14 +643,22 @@ def main() -> int:
         "gui_framework_decision_tree.md Avalonia anti-pattern text is stale",
     )
 
-    build_python_text = (ROOT / "scripts" / "build_python.ps1").read_text(encoding="utf-8")
     build_dotnet_text = (ROOT / "scripts" / "build_dotnet.ps1").read_text(encoding="utf-8")
     build_linux_text = (ROOT / "scripts" / "build_linux.ps1").read_text(encoding="utf-8")
     build_electron_text = (ROOT / "scripts" / "build_electron.ps1").read_text(encoding="utf-8")
     build_fyne_text = (ROOT / "scripts" / "build_go_fyne.ps1").read_text(encoding="utf-8")
-    check("BackupSource" in build_python_text, "build_python.ps1 missing -BackupSource")
-    check("BackupSource" in build_dotnet_text, "build_dotnet.ps1 missing -BackupSource")
+    for build_script in build_ps1:
+        build_text = build_script.read_text(encoding="utf-8")
+        check(
+            "[switch] $BackupSource" in build_text and "backup_source.ps1" in build_text,
+            f"{build_script.name} missing -BackupSource wiring",
+        )
     check("OutputDir" in build_dotnet_text, "build_dotnet.ps1 missing -OutputDir")
+    qt_build_text = (ROOT / "scripts" / "build_qt.ps1").read_text(encoding="utf-8")
+    check(
+        "Refusing to remove" in qt_build_text,
+        "build_qt.ps1 must refuse staging removal that overlaps project source",
+    )
     check("-H windowsgui" not in build_linux_text, "build_linux.ps1 still uses -H windowsgui")
     check(
         "$py3.Source -m PyInstaller" in build_linux_text,
@@ -588,11 +796,37 @@ def main() -> int:
     )
     check("ubuntu-22.04" in index_text, "INDEX.md stale CI runner")
     check("ruff format --check" in readme_text, "README.md CI table must show format check")
-    check("Passed: 77" in tests_readme_text, "tests/README.md stale Windows smoke count")
+    readme_count = re.search(r"Passed:\s*(\d+)", tests_readme_text)
+    skill_count = re.search(r"\((\d+)\s*/\s*\d+ currently pass", skill_text)
+    check(
+        readme_count is not None
+        and skill_count is not None
+        and int(readme_count.group(1)) == int(skill_count.group(1)),
+        "SKILL.md Windows smoke count must match tests/README.md",
+    )
     run_lint_text = (ROOT / "tests" / "run_lint.ps1").read_text(encoding="utf-8")
     check(
         "-InstallDeps" in run_lint_text,
         "run_lint.ps1 missing check-only -InstallDeps switch",
+    )
+    dev_reqs_text = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    check(
+        "requirements-dev.txt" in ci_text
+        and "requirements-dev.txt" in run_lint_text
+        and "requirements-dev.txt" in readme_text,
+        "requirements-dev.txt must be referenced by CI, run_lint.ps1, and README.md",
+    )
+    for dev_pin in ("ruff==", "mypy==", "types-requests"):
+        check(dev_pin in dev_reqs_text, f"requirements-dev.txt missing {dev_pin}")
+    precommit_text = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    ruff_req = re.search(r"ruff==([\d.]+)", dev_reqs_text)
+    mypy_req = re.search(r"mypy==([\d.]+)", dev_reqs_text)
+    check(
+        ruff_req is not None
+        and mypy_req is not None
+        and f"v{ruff_req.group(1)}" in precommit_text
+        and f"v{mypy_req.group(1)}" in precommit_text,
+        "pre-commit ruff/mypy revs must match requirements-dev.txt",
     )
     contributing_text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
     check(
@@ -605,6 +839,10 @@ def main() -> int:
     check(
         "Where-Object { $_ -ne $name }" in bootstrap_text,
         "bootstrap_environment.ps1 must clear successfully installed toolchains",
+    )
+    check(
+        bootstrap_text.count("Test-Toolchain $map.toolchains.python") >= 2,
+        "bootstrap_environment.ps1 dry-run must not print a pip plan when Python is missing",
     )
     backup_text = (ROOT / "scripts" / "backup_source.ps1").read_text(encoding="utf-8")
     check(

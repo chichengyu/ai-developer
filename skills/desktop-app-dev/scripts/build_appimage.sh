@@ -2,8 +2,8 @@
 # build_appimage.sh -- Package a Linux ELF binary into an AppImage.
 #
 # AppImage is a single-file portable Linux binary that runs on most
-# distros without installation. This script downloads linuxdeploy
-# and uses it to bundle the binary into a working AppImage.
+# distros without installation. This script uses a local linuxdeploy
+# AppImage and downloads it only when --download is passed.
 #
 # Run on Linux. Requires wget, file, and the ELF binary to bundle.
 #
@@ -46,9 +46,10 @@ case "$TARGET_ARCH" in
         ;;
 esac
 
-# 1. Stage the AppDir layout expected by linuxdeploy.
-APPDIR="AppDir"
-rm -rf "$APPDIR"
+# 1. Stage the AppDir layout expected by linuxdeploy in a private temp dir.
+STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/desktop-app-dev-appimage.XXXXXX")"
+APPDIR="$STAGE_DIR/AppDir"
+trap 'rm -rf "$STAGE_DIR"' EXIT
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
 cp "$BIN_PATH" "$APPDIR/usr/bin/${APP_NAME,,}"

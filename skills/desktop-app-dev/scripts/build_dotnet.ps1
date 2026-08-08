@@ -1,4 +1,4 @@
-# build_dotnet.ps1 -- .NET self-contained publish with ReadyToRun + optional Costura.Fody.
+# build_dotnet.ps1 -- .NET self-contained single-file publish (size-lean by default; R2R / trim opt-in).
 # Usage: powershell -File build_dotnet.ps1 -Project src/MyApp/MyApp.csproj -Rid win-x64
 #        powershell -File build_dotnet.ps1 -Project src/MyApp/MyApp.csproj -BackupSource
 [CmdletBinding()]
@@ -8,7 +8,12 @@ param(
     [Alias("Arch")]
     [string] $Rid = "win-x64",
     [string] $Configuration = "Release",
-    [switch] $NativeAot,
+    [switch] $NativeAot,             # NativeAOT publish (smaller, no JIT)
+    [switch] $ReadyToRun,            # opt-in R2R; adds size, improves cold start
+    [switch] $Trim,                  # opt-in trimming; may break reflection-heavy code
+    [ValidateSet("copyused", "partial", "full")]
+    [string] $TrimMode = "partial",
+    [bool] $InvariantGlobalization = $true,   # drop ICU data; disable for localized apps
     [switch] $Costura,
     [switch] $BackupSource,          # timestamped source zip before publishing
     [string] $OutputDir = ""         # explicit publish output dir
@@ -48,18 +53,33 @@ $pubArgs = @(
     "-r", $Rid,
     "--self-contained", "true",
     "-p:PublishSingleFile=true",
-    "-p:IncludeNativeLibrariesForSelfExtract=true"
+    "-p:IncludeNativeLibrariesForSelfExtract=true",
+    "-p:EnableCompressionInSingleFile=true",
+    "-p:DebugType=None",
+    "-p:DebugSymbols=false"
 )
 if ($OutputDir) {
     $pubArgs += "-o"
     $pubArgs += $OutputDir
 }
 
-if (-not $NativeAot) {
-    $pubArgs += "-p:PublishReadyToRun=true"
-} else {
+if ($InvariantGlobalization) {
+    $pubArgs += "-p:InvariantGlobalization=true"
+}
+if ($Trim) {
+    $pubArgs += "-p:PublishTrimmed=true"
+    $pubArgs += "-p:TrimMode=$TrimMode"
+}
+if ($NativeAot) {
     $pubArgs += "-p:PublishAot=true"
+    $pubArgs += "-p:OptimizationPreference=Size"
+    $pubArgs += "-p:IlcOptimizationPreference=Size"
     Write-Host "==> NativeAOT enabled (smallest EXE, requires .NET 8+)" -ForegroundColor Cyan
+} elseif ($ReadyToRun) {
+    $pubArgs += "-p:PublishReadyToRun=true"
+    Write-Host "==> ReadyToRun enabled (larger EXE, faster cold start)" -ForegroundColor Cyan
+} else {
+    Write-Host "==> Size-optimized publish: compression on, symbols off, no R2R. Pass -ReadyToRun to opt in." -ForegroundColor Cyan
 }
 
 Write-Host "==> dotnet publish" -ForegroundColor Cyan
@@ -76,7 +96,14 @@ $binPath = if ($OutputDir) {
              Select-Object -First 1
     if ($found) { $found.FullName } else { Join-Path $publishRoot "$tfm/$Rid/publish" }
 }
-Write-Host "==> Output: $binPath" -ForegroundColor Green
+$exe = Get-ChildItem -Path $binPath -Filter *.exe -ErrorAction SilentlyContinue |
+       Select-Object -First 1
+if ($exe) {
+    $size = $exe.Length
+    Write-Host ("==> Output: {0}  ({1:N1} MB / {2:N0} KB)" -f $exe.FullName, ($size / 1MB), ($size / 1KB)) -ForegroundColor Green
+} else {
+    Write-Host "==> Output: $binPath" -ForegroundColor Green
+}
 Write-Host "Next: sign with signtool, then test on a clean Windows VM." -ForegroundColor Yellow
 
 

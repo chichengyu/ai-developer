@@ -2,6 +2,517 @@
 
 All notable improvements to this skill. Newest entries first.
 
+## 2026-08-08 (round 34) -- Slim SKILL.md with mandatory hooks
+
+### Changed
+
+- `SKILL.md` -- compressed from 25,529 to 16,264 bytes. UI-01..18 keep a
+  compact ID/requirement table; full acceptance criteria stay in
+  `references/ui_hard_requirements.md`. Media/web script lists became
+  compact scenario indexes with all script paths retained.
+- Mandatory application hooks kept: MUST open
+  `references/ui_hard_requirements.md` before UI work, MUST open
+  `references/minimal_change_requirements.md` before code changes, Step 0
+  records UI-01..18 + CODE-01..05, Step 4.5 applies both, Step 6 verifies
+  both.
+
+### Tests
+
+- `tests/test_docs.py` now guards the mandatory-open hooks and the
+  Step 0 UI+CODE recording rule.
+
+### Verified
+
+- test_docs.py -- 789 checks
+- test_no_bom.py -- 215 files, 0 BOM / U+FEFF
+- smoke_windows.ps1 -- 110 / 110
+- ruff check / ruff format --check -- green
+- SKILL.md -- 16,264 bytes
+
+## 2026-08-08 (round 33) -- Minimal-change hard requirements
+
+### Added
+
+- `SKILL.md` -- `代码开发硬性要求（minimal-change hard requirements）`
+  compact rule set: keep working original logic, minimal diff, explicit
+  waiver; full CODE-01..CODE-05 checklist moved to
+  `references/minimal_change_requirements.md`.
+- `references/minimal_change_requirements.md` -- canonical CODE-01..CODE-05
+  rules with acceptance criteria and decision rules.
+- `templates/requirements_checklist.md` and `templates/release_checklist.md`
+  now carry CODE-01..CODE-05 record/waiver and release gates.
+- `tests/test_docs.py` -- structural checks for the CODE-01..CODE-05
+  heading, reference file, template wiring, and README/INDEX coverage.
+
+### Docs
+
+- `SKILL.md` Step 4.5 and Step 6 now apply CODE-01..CODE-05 to all code
+  changes; `README.md` and `INDEX.md` document the minimal-change rules.
+
+### Verified
+
+- test_docs.py -- 786 checks
+- test_no_bom.py -- 215 files, 0 BOM / U+FEFF
+- SKILL.md size -- 25,529 bytes (<= 25 KiB)
+
+## 2026-08-08 (round 32) -- Bounded pool concurrency deep enhancement
+
+### Added
+
+- `scripts/threading_pool.py` -- runtime-safe Python worker pool with
+  bounded concurrency, aggregate `BatchProgress`, per-item progress,
+  `RetryPolicy`, fail-fast, and cooperative cancellation.
+- 7 more pool templates: `threading_pool_tkinter.py`,
+  `threading_pool_pyside6.py`, `threading_pool_csharp.cs`,
+  `threading_pool_tauri.rs`, `threading_pool_kotlin_compose.kt`,
+  `threading_pool_electron.ts`, and
+  `threading_pool_electron_worker.ts`. The `scripts/threading_*` set is
+  now 30 files (22 single-worker + 8 pool).
+- `tests/test_threading_concurrency.py` -- runtime checks for bounds,
+  retry, cancel, progress aggregation, per-item errors, and fail-fast;
+  wired into the Windows / macOS / Linux smoke suites.
+- `references/threading_playbook.md` and `framework_matrix.md` now carry
+  pool-template tables, aggregate-progress rules, retry/backoff,
+  backpressure, and cancellation fan-out guidance.
+
+### Docs
+
+- `SKILL.md`, `README.md`, `INDEX.md`, and `tests/README.md` updated with
+  the 30-template map and pool-first guidance for batch work.
+
+### Verified
+
+- smoke_windows.ps1 -- 110 / 110
+- test_docs.py -- 766 checks
+- threading templates -- 22 / 22 single + 8 / 8 pool
+- threading concurrency -- 5 / 5
+- media pipeline -- 56 / 56
+- test_no_bom.py -- 214 files, 0 BOM / U+FEFF
+- arch awareness -- 16 / 16
+- ruff check / ruff format --check / mypy scripts/ -- all green
+
+## 2026-08-08 (round 31) -- Deep threading enhancement
+
+### Added
+
+- 15 new threading templates: WinForms, Avalonia, .NET MAUI, Electron
+  (main + worker), Qt 6, Wails, Fyne, walk, egui, Slint, JavaFX, Compose,
+  Flutter, and Win32 C. The `scripts/threading_*` set is now 22 files.
+- `references/threading_playbook.md` -- worker contract, 22-template map,
+  patterns (worker pools, sequential queues, fan-out, progress throttling,
+  state handoff, COM apartments, dispatcher lifetime), anti-patterns, and a
+  Step 6 checklist.
+- `tests/test_threading_templates.py` -- source-level contract check for
+  every threading template (cancel, progress, error, UI bridge); wired
+  into the Windows / macOS / Linux smoke suites.
+- `tests/test_docs.py` now enforces the playbook registration and the
+  22-template count.
+
+### Fixed
+
+- `scripts/threading_dispatch.swift` -- rewritten to a clean
+  `Task.detached` + `@MainActor` contract; the previous Task signature was
+  not usable as a job bridge.
+- WPF / WinUI templates now support `onCancel`, dispose the
+  `CancellationTokenSource`, and reject starting without a UI dispatcher.
+- PySide6 template now honors the `auto_delete` option.
+
+### Docs
+
+- `SKILL.md`, `README.md`, `INDEX.md`, `framework_matrix.md`, and
+  `CONTRIBUTING.md` updated with the 22-template map and playbook pointer.
+
+### Verified
+
+- smoke_windows.ps1 -- 105 / 105
+- test_docs.py -- 754 checks
+- threading templates -- 22 / 22
+- media pipeline -- 56 / 56
+- test_no_bom.py -- 205 files, 0 BOM / U+FEFF
+- arch awareness -- 16 / 16
+- select_framework.py -- self-test pass
+- ruff check / ruff format --check / mypy scripts/ -- all green
+
+## 2026-08-08 (round 30) -- Library entry points and doc drift fixes
+
+### Added
+
+- Every Python script under `scripts/` now ships a `__main__` block; 16
+  library modules gained a no-I/O import/usage entry point so the README
+  convention is fully met.
+- `tests/test_docs.py` now enforces the `__main__` convention for every
+  Python script under `scripts/`.
+
+### Fixed
+
+- `SKILL.md` Step 2.5 no longer claims every build helper supports
+  `-Install`; only helpers with a safe installer (PyInstaller / tauri-cli /
+  electron-builder / fyne / wails) install on `-Install`, and the rest fail
+  with the exact install command.
+- `README.md` and `INDEX.md` arch wording now says the structural test
+  reports 16 / 16 checks (14 build scripts + 2 auto-update parse checks).
+- `tests/test_media_pipeline.py` suppresses the expected stderr message
+  from the deliberate 404 fetch in `test_web_data_pipeline_deep_crawl`, so
+  the final verification summary is clean.
+
+### Verified
+
+- smoke_windows.ps1 -- 103 / 103
+- test_docs.py -- 720 checks
+- media pipeline -- 56 / 56
+- test_no_bom.py -- 188 files, 0 BOM / U+FEFF
+- arch awareness -- 16 / 16
+- select_framework.py -- self-test pass
+- ruff check / ruff format --check / mypy scripts/ -- all green
+
+## 2026-08-08 (round 29) -- Single-file zero-runtime packaging optimization
+
+### Added
+
+- `scripts/build_python.ps1` -- `--noupx` and safe `-ExcludeModules`
+  defaults, plus a printed EXE size report.
+- `scripts/build_dotnet.ps1` -- compression on / symbols off by default,
+  ReadyToRun and trimming are now opt-in, invariant globalization default.
+- `scripts/build_dotnet_nativeaot.ps1` -- invariant globalization and no
+  debug symbols, keeping NativeAOT as the smallest .NET path.
+- `scripts/build_qt.ps1` -- minimal `windeployqt` flags
+  (`--no-translations --no-system-d3d-compiler --no-opengl-sw
+  --no-compiler-runtime`) and portable-folder size report.
+- `scripts/build_tauri.ps1` -- NSIS single-installer default and automatic
+  size-lean Rust release profile via Cargo env vars, with artifact size
+  reporting.
+- `scripts/build_electron.ps1` -- `compression=maximum`, `asar`, and a
+  clear warning that Electron is the wrong default for small size / RAM.
+- Go helpers (`build_go_wails.ps1`, `build_go_fyne.ps1`,
+  `build_go_gio.ps1`) -- stripped binaries, hidden console, and
+  `-trimpath -buildvcs=false` by default.
+- `scripts/build_swift.ps1` -- `-Osize` default and EXE size report.
+- `scripts/build_macos.ps1` / `build_linux.ps1` -- same compression /
+  symbol / Rust-profile defaults for dotnet, cargo, go, and python paths.
+- Docs: `references/distribution_playbook.md` size / memory table and
+  per-framework flags; SKILL.md Step 5/6 single-file and idle-memory gates;
+  README / INDEX quick recipes; `templates/release_checklist.md` gates.
+- Tests: 10 new packaging-optimization regression checks in
+  `tests/smoke_windows.ps1` plus matching doc-audit terms.
+
+### Verified
+
+- smoke_windows.ps1 -- 103 / 103
+- test_docs.py -- 683 checks
+- media pipeline -- 56 / 56
+- test_no_bom.py -- 188 files, 0 BOM / U+FEFF
+- select_framework.py -- self-test pass
+- ruff check / ruff format --check / mypy scripts/ -- all green
+
+## 2026-08-08 (round 28) -- Cloudflare high-intensity challenge handling
+
+### Added
+
+- `scripts/cloudflare_challenge.py` -- dedicated high-intensity Cloudflare
+  handler: stage classification (`js_challenge`,
+  `managed_non_interactive`, `turnstile_captcha`, `blocked`), `cf_clearance`
+  cookie waiting, Turnstile checkbox interaction, third-party token
+  injection, reload retries, and `needs_new_session` proxy-rotation signal.
+- `web_data_pipeline.py` -- new `cloudflare` config section. After the
+  challenge passes, the pipeline reuses the browser user agent,
+  `cf_clearance` cookie, and pinned proxy for subsequent API fetches so the
+  clearance is not invalidated by an IP / UA mismatch.
+- `security_detector.py` -- Cloudflare challenge findings now include stage,
+  sitekey, frame URL, ray ID, and clearance-cookie presence details.
+
+### Docs
+
+- `references/web_data_pipeline_playbook.md`, `SKILL.md`, `README.md`, and
+  `INDEX.md` -- Cloudflare high-intensity workflow and `cloudflare` config.
+- `tests/test_media_pipeline.py` -- Cloudflare state extraction and fake
+  browser challenge-handler tests.
+
+### Verified
+
+- media pipeline -- 56 / 56
+- test_docs.py -- 671 checks
+- test_no_bom.py -- 188 files, 0 BOM / U+FEFF
+- smoke_windows.ps1 -- 93 / 93
+- arch awareness -- 16 / 16
+- ruff check, ruff format --check, mypy scripts/ -- all green
+
+## 2026-08-08 (round 27) -- Automatic security identification + deep crawling
+
+### Added
+
+- `scripts/security_detector.py` -- classifies Cloudflare challenge / block,
+  WAF, rate limit, CAPTCHA, login wall, cookie consent, JS required, geo
+  block, empty page, and SPA shell responses into an actionable
+  `SecurityReport`. `WebDataPipeline` uses the report to retry, rotate
+  proxy, escalate to the fingerprint browser, or skip without user input.
+- `scripts/deep_crawler.py` -- BFS deep crawler over links and sitemaps with
+  robots.txt, same-host / include / exclude filters, depth and page limits,
+  URL deduplication, and blocked-page skipping. Includes a standalone CLI.
+- `MediaSession.get_bytes_with_meta()` and non-raising
+  `request_json_with_meta()` now return body, status, and headers for
+  4xx / 5xx responses. `ApiFetchResult` keeps `status`, `headers`, and a
+  `security` report instead of only a generic exception.
+- `PageDataAnalysis.links` and `BrowserSession.wait_for_challenge()`.
+  `web_data_pipeline.py` accepts `security` and `crawl` config sections.
+- `RobotsPolicy.sitemap_urls()` plus raw robots text access.
+
+### Docs
+
+- `references/web_data_pipeline_playbook.md` -- new automatic security
+  identification and deep crawling sections, plus API failure metadata
+  notes.
+- `SKILL.md`, `README.md`, and `INDEX.md` -- pointers to the new scripts and
+  config sections.
+- `tests/test_media_pipeline.py` -- security classifier, deep crawler,
+  HTTP error metadata, and pipeline crawl integration tests.
+
+### Verified
+
+- media pipeline -- 54 / 54
+- test_docs.py -- 663 checks
+- test_no_bom.py -- 187 files, 0 BOM / U+FEFF
+- smoke_windows.ps1 -- 92 / 92
+- arch awareness -- 16 / 16
+- ruff check, ruff format --check, mypy scripts/ -- all green
+
+## 2026-08-08 (round 26) -- Proxy pools, multi-account, schedules, notifications
+
+### Added
+
+- `scripts/proxy_pool.py` -- round-robin / random proxy pool with failure
+  cooldown plus a named `ProxyPoolStore` for sidecar-managed pools.
+  `MediaSession`, `ApiClient`, and `WebDataPipeline` now rotate proxies on
+  retry without changing their existing APIs.
+- `scripts/account_manager.py` -- persistent multi-account profiles with
+  storage state, cookie files, browser profile dirs, proxies, headers, and
+  login config. Tasks lease one account at a time; failed accounts cool
+  down before reuse.
+- `scripts/task_scheduler.py` -- interval / daily / cron / once schedules
+  persisted in the same SQLite database as the task queue, with a sidecar
+  loop that enqueues due tasks.
+- `scripts/notifier.py` -- best-effort completion notifications through
+  desktop toast, SMTP email, and webhook.
+- Sidecar endpoints: `/proxy-pools`, `/accounts`, `/schedules`, and
+  `/notifications/status` / `/notifications/test`. `POST /tasks` also
+  accepts `run_after_seconds` for one-shot delayed tasks.
+- Per-task controls: `"account": "<name>"`, `"proxy_pool": ...`,
+  `"auto_retry": false`, `"retry_delay_seconds": N`, and
+  `"notify": false`.
+
+### Docs
+
+- `references/web_data_pipeline_playbook.md` -- new sections for proxy
+  pools, multi-account sessions, scheduled tasks / retry, and notifications.
+- `SKILL.md`, `README.md`, `INDEX.md`, and
+  `references/media_acquisition_playbook.md` -- advanced automation
+  pointers and sidecar endpoint references.
+
+### Verified
+
+- `smoke_windows.ps1` -- 90 / 90
+- `test_docs.py` -- 647 checks
+- `test_no_bom.py` -- 185 files, 0 BOM / U+FEFF
+- media pipeline -- 48 / 48
+- arch awareness -- 16 / 16
+- ruff check, ruff format --check, mypy scripts/ -- all green
+
+## 2026-08-08 (round 25) -- x64 selector weights, safe staging, universal source backup
+
+### Fixed
+
+- `scripts/select_framework.py` -- architecture weighting now distinguishes
+  `macos-x64` / `linux-x64` from arm64. `macos x64` no longer weights
+  `macos_arm64_arch`, Linux x64 now scores per-arch instead of being
+  ignored, and all seven architecture dimensions have human-readable labels.
+- `scripts/build_qt.ps1` -- refuses to remove a staging directory that
+  overlaps the project source, and supports `-BackupSource`.
+- `scripts/build_appimage.sh` / `scripts/build_deb.sh` -- stage in a private
+  `mktemp` directory instead of deleting user-visible `AppDir` / `stage_*`
+  folders; the AppImage header no longer claims linuxdeploy is downloaded
+  by default.
+- `scripts/bootstrap_environment.ps1` -- dry-run only prints the pip command
+  when Python is actually available, otherwise reports that Python must be
+  installed first.
+
+### Added
+
+- `-BackupSource` is now supported by all 14 `scripts/build_*.ps1` helpers,
+  not just `build_python.ps1` / `build_dotnet.ps1`.
+- `tests/test_docs.py` -- duplicate `##` heading audit, selector x64
+  dimension checks, all-build-script `-BackupSource` wiring checks,
+  `build_qt.ps1` staging guard, and bootstrap dry-run consistency
+  (623 checks).
+- `tests/smoke_windows.ps1` -- checks every build helper exposes
+  `-BackupSource` and that `build_qt.ps1` protects source staging (86 / 86).
+
+### Verified
+
+- `smoke_windows.ps1` -- 86 / 86
+- `test_docs.py` -- 623 checks
+- `test_no_bom.py` -- 181 files, 0 BOM / U+FEFF
+- media pipeline -- 42 / 42; arch awareness -- 16 / 16
+- selector self-test -- 8 / 8 canonical cases + arch-weight assertions
+  (24 x 29)
+- ruff check, ruff format --check, mypy scripts/ -- all green
+
+## 2026-08-08 (round 24) -- Lint version pinning, CI cache, cleanup
+
+### Changed
+
+- `tests/run_lint.ps1` -- `Ensure-Tool` now reads the exact version from
+  `requirements-dev.txt` and compares it with `pip show` output instead
+  of only checking that the module imports. Check-only mode reports a
+  version mismatch; `-InstallDeps` installs the pinned version.
+- `.github/workflows/ci.yml` -- the lint job now enables the
+  `setup-python` pip cache, matching the Windows smoke job.
+- `tests/test_docs.py` -- verifies the pre-commit ruff/mypy revisions
+  stay in sync with `requirements-dev.txt` (571 checks).
+
+### Housekeeping
+
+- Removed the empty stray `app/` directory from the skill root.
+
+### Verified
+
+- `smoke_windows.ps1` -- 84 / 84
+- `test_docs.py` -- 571 checks
+- `test_no_bom.py` -- 181 files, 0 BOM / U+FEFF
+- media pipeline -- 42 / 42; arch awareness -- 16 / 16
+- selector self-test -- 8 / 8; VK table -- 119 keys / 10 templates
+- ruff check, ruff format --check, mypy scripts/ -- all green
+
+## 2026-08-08 (round 23) -- Toolchain dry-run safety, dev deps, doc sync
+
+### Fixed
+
+- `scripts/bootstrap_environment.ps1` -- `-DryRun` now always wins over
+  `-Install`. Previously `-DryRun -Install` executed winget/pip installs
+  and then printed "no changes were made"; dry-run now skips every
+  install action and prints the pip command it would run.
+- `SKILL.md` -- SendInput / window-enum template counts no longer double
+  count Java; Step 1 Category C no longer lists service/driver delivery
+  as in scope while "Out of scope" forbids it.
+- `scripts/select_framework.py` -- self-test case lines use `[OK]`
+  consistently instead of `[OK  ]`.
+
+### Added
+
+- `requirements-dev.txt` -- shared pin file for `ruff==0.6.9`,
+  `mypy==1.13.0`, and `types-requests`. CI and `tests/run_lint.ps1` now
+  consume the same file, and `run_lint.ps1` checks `types-requests`
+  alongside ruff/mypy.
+- `tests/smoke_windows.ps1` -- regression test proving
+  `bootstrap_environment.ps1 -DryRun -Install` never runs an install,
+  plus a doc-count sync check that fails when README/SKILL smoke counts
+  drift from the real total.
+- `tests/test_docs.py` -- Windows smoke count checks now compare
+  README/SKILL dynamically instead of hard-coding `83`, and verify
+  `requirements-dev.txt` is referenced by CI, run_lint, and README.
+
+### Verified
+
+- `smoke_windows.ps1` -- 84 / 84
+- `test_arch_awareness.ps1` -- 16 / 16
+- `test_docs.py` -- 570 checks
+- `test_no_bom.py` -- 181 files, 0 BOM / U+FEFF
+- media pipeline -- 42 / 42
+- selector self-test -- 8 / 8; VK table -- 119 keys / 10 templates
+- ruff check, ruff format --check, mypy scripts/ -- all green
+
+## 2026-08-08 (round 22) -- API manifest, fetch metadata, live task events
+
+### Added
+
+- `scripts/api_analyzer.py` -- deep API manifest: endpoint scoring, auth
+  header names (redacted by default), candidate pagination config, list data
+  paths inside JSON responses, and summary counts.
+- `api_client.ApiFetchResult` now carries HTTP status, response headers, and
+  request duration; `MediaSession.request_json_with_meta()` returns
+  `(data, status, headers)`.
+- `media_pipeline_service.py` records per-task progress events and exposes
+  `GET /tasks/<id>/progress` and `GET /tasks/<id>/events?after=N` for
+  real-time desktop UI polling.
+- `data_processor.py` adds a `join` step for left/inner joins against
+  another JSON / JSONL / CSV file.
+- `web_data_pipeline.py` can write an API manifest (`api.manifest_output`)
+  and auto-applies inferred pagination (`api.auto_pagination`, default true).
+
+### Verified
+
+- `smoke_windows.ps1` -- 83 / 83
+- `test_arch_awareness.ps1` -- 16 / 16
+- `test_docs.py` -- 565 checks
+- `test_no_bom.py` -- 180 files, 0 BOM / U+FEFF
+- media pipeline -- 42 / 42
+
+## 2026-08-08 (round 21) -- Pagination, cookies, richer data rules, live progress
+
+### Added
+
+- `api_client.py` now supports automatic pagination (`page` / `offset` /
+  `cursor`) driven by `items_path`, `total_path`, `has_more_path`, and
+  `next_path`; fetch results report the actual page count.
+- `ApiClient` accepts Playwright-style cookies so browser-login sessions are
+  carried into API fetching; `web_data_pipeline` copies browser cookies
+  automatically.
+- `data_processor.py` adds `drop`, `default`, `convert`, `map`, and
+  `replace` operations for common field cleanup and derivation.
+- `web_data_pipeline.py` accepts an optional progress callback and reports
+  collect / discover / fetch / process / save / done stages.
+- `media_pipeline_service.py` forwards webdata task progress into the SQLite
+  queue progress field for live desktop UI updates.
+- `OcrCaptchaSolver` preprocesses image CAPTCHAs (grayscale, threshold,
+  resize) before OCR when Pillow is available.
+
+### Verified
+
+- `smoke_windows.ps1` -- 82 / 82
+- `test_arch_awareness.ps1` -- 16 / 16
+- `test_docs.py` -- 560 checks
+- `test_no_bom.py` -- 179 files, 0 BOM / U+FEFF
+- media pipeline -- 39 / 39
+
+## 2026-08-08 (round 20) -- Web data pipeline
+
+### Added
+
+- `scripts/api_client.py` -- converts page/network captures into replayable
+  API specs and fetches JSON through `MediaSession` with rate limits and
+  retries; includes `build_api_specs`, `ApiClient`, and a local self-test.
+- `scripts/data_processor.py` -- declarative processing engine with
+  select / rename / filter / sort / dedupe / flatten / limit / aggregate
+  steps and JSON / JSONL / CSV I/O.
+- `scripts/web_data_pipeline.py` -- one-config end-to-end pipeline for
+  fingerprint browser + auto CAPTCHA + page/API analysis + API fetching +
+  data processing.
+- `references/web_data_pipeline_playbook.md` -- full workflow, config
+  schema, CAPTCHA modes, API replay, processing operations, UI sidecar
+  integration, and compliance checklist.
+- `scripts/media_pipeline_service.py` now accepts `kind: "webdata"` tasks
+  so desktop UIs can run the whole pipeline through the sidecar.
+
+### Enhanced
+
+- `scripts/captcha_solver.py` -- local OCR adapter (`OcrCaptchaSolver`) and
+  OCR-first automatic solving with third-party / manual fallback; CLI
+  self-test.
+- `scripts/browser_session.py` -- network entries now keep request POST
+  bodies and content types; Playwright storage state can be saved/restored;
+  `BrowserSession` accepts a `storage_state` profile path.
+- `scripts/media_session.py` -- `request_json()` for arbitrary methods with
+  JSON or raw bodies.
+- `scripts/media_dependencies.py` -- checks/installs Pillow and pytesseract
+  and reports system `tesseract` availability as the `ocr` status key.
+
+### Verified
+
+- `smoke_windows.ps1` -- 82 / 82
+- `test_arch_awareness.ps1` -- 16 / 16
+- `test_docs.py` -- 560 checks
+- `test_no_bom.py` -- 179 files, 0 BOM / U+FEFF
+- media pipeline -- 36 / 36; selector self-test -- 8 / 8; VK table --
+  119 keys / 10 templates
+
 ## 2026-08-08 (round 19) -- Slim SKILL.md entry point
 
 ### Changed

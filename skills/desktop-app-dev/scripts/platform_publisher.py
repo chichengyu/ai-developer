@@ -111,3 +111,9 @@ class RetryPublisher(Publisher):
                     time.sleep(self.backoff_seconds * (2**attempt))
         assert last_error is not None
         raise last_error
+
+
+if __name__ == "__main__":
+    print(
+        "desktop-app-dev platform_publisher: subclass PlatformPublisher to add a publish adapter."
+    )

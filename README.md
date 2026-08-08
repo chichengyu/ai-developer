@@ -10,14 +10,14 @@
 
 ## 项目简介
 
-**ai-developer-skill** 是一套专为 AI开发者的 Codex 技能集合，覆盖 Java 研发现控、跨平台应用交付、AI 漫剧视频制作和合规网络采集。本套件包含八个可独立安装的技能：
+**ai-developer-skill** 是一套专为 AI开发者的 Codex 技能集合，覆盖 Java 研发现控、跨平台应用交付与桌面数据流水线、AI 漫剧视频制作和合规网络采集。本套件包含八个可独立安装的技能：
 
 | 技能 | 角色 | 关键能力 |
 |------|------|----------|
 | **multi-db-analyzer** | 多数据库深度分析师 | 15+ 数据库引擎统一分析：Schema、数据质量、FK拓扑、执行计划 |
 | **java-superpowers-contract** | 研发现控官 | Git worktree 隔离、四层分析契约、强制审计 |
 | **token-economizer** | 输出压缩师 | 无感压缩 Codex 输出，降低 Token 消耗 |
-| **desktop-app-dev** | 跨平台桌面应用架构师 | 8 步交付、24 框架选型、硬件输入/线程/媒体采集模板、源码保护打包 |
+| **desktop-app-dev** | 跨平台桌面应用架构师 | 8 步交付、24 框架选型、30 线程模板、媒体/Web 数据流水线、源码保护打包 |
 | **mobile-app-dev** | 移动应用架构师 | 8 步交付、SwiftUI/Compose/Flutter/RN 自动选型、真机验证与上架 |
 | **scraper-unblocker** | 合规网络采集助手 | 403/429/JS 挑战/WAF 诊断、robots 合规爬虫、图片/视频/HLS 深爬 |
 | **manga-drama-video** | AI 漫剧视频导演 | 10 步审批门禁、跨集一致性、去 AI 味审计、配音/字幕/成片 |
@@ -113,7 +113,7 @@ sequenceDiagram
 
 ### 应用与内容创作链路
 
-`desktop-app-dev` 与 `mobile-app-dev` 可独立完成从需求分析、框架选型到打包验证、交付的完整流程；`desktop-app-dev` 同时提供媒体采集、HLS 下载、转码发布与源码保护模板；`scraper-unblocker` 负责合规网站与媒体深爬，可与桌面应用采集链路配合；`manga-drama-video` 提供 10 步审批门禁的完整漫剧视频流水线，`manga-drama-video-helper` 提供更轻量的三阶段版本。需要更严格的跨集一致性锁和 De-AI 审计时，可把 helper 产物转交 `manga-drama-video` 继续生产。
+`desktop-app-dev` 与 `mobile-app-dev` 可独立完成从需求分析、框架选型到打包验证、交付的完整流程；`desktop-app-dev` 同时提供媒体采集、HLS 下载、Web 数据采集处理、转码发布与源码保护模板；`scraper-unblocker` 负责合规网站与媒体深爬，可与桌面应用采集链路配合；`manga-drama-video` 提供 10 步审批门禁的完整漫剧视频流水线，`manga-drama-video-helper` 提供更轻量的三阶段版本。需要更严格的跨集一致性锁和 De-AI 审计时，可把 helper 产物转交 `manga-drama-video` 继续生产。
 
 ---
 
@@ -201,7 +201,7 @@ sequenceDiagram
 
 ### desktop-app-dev — 跨平台桌面应用交付
 
-**核心能力：** 为 Windows / macOS / Linux 原生桌面 GUI 应用提供 8 步交付流程，覆盖需求分析、应用分类、框架选型、任务拆解、核心模式、打包、验证和交付，并内置媒体采集/HLS/发布流水线与源码保护。
+**核心能力：** 为 Windows / macOS / Linux 原生桌面 GUI 应用提供 8 步交付流程，覆盖需求分析、应用分类、框架选型、任务拆解、核心模式、打包、验证和交付，并内置媒体采集/HLS/发布、Web 数据采集/处理流水线与源码保护。
 
 功能清单：
 
@@ -212,15 +212,18 @@ sequenceDiagram
 | 环境自动安装 | `bootstrap_environment.ps1` 默认 DryRun 检测，显式 `-Install` 才安装所选框架工具链 |
 | 硬件输入模板 | SendInput / CGEventPost / XTestFakeInputEvent，禁止 PostMessage 与内存写入 |
 | 窗口枚举模板 | EnumWindows / Quartz / X11 带 3 秒超时与会话缓存 |
-| 线程化模板 | WPF / WinUI / tkinter / PySide6 / Tauri 等多框架不卡顿样板 |
+| 线程化模板 | 30 个模板（22 单任务 + 8 有界线程池），覆盖 WPF / WinUI / tkinter / PySide6 / Tauri 等 |
 | UI 硬性要求 | UI-01..UI-18 强制验收，未显式豁免不得跳过 |
+| 最小改动要求 | CODE-01..CODE-05 强制保留原逻辑、最小 diff，豁免须记录 |
 | 媒体采集与发布 | `media_*` / HLS 下载 / task_queue / ffmpeg 转码 / 平台发布 / HTTP sidecar |
+| Web 数据流水线 | API 抓取/分析、深爬、Cloudflare/安全识别、代理池、多账号、定时任务、通知 |
+| 多语言 Sidecar | `media_pipeline_service.py` + `clients/` 八语言封装，任意桌面 UI 可调用 |
 | 源码保护 | 打包前 `-BackupSource` 生成时间戳源码 zip，构建脚本不删除源码 |
 | 打包脚本 | 14 个 `build_*.ps1` + DMG / AppImage / deb 助手，覆盖主流架构 |
 | 签名与更新 | Authenticode / codesign / notarytool，Velopack / Squirrel / Sparkle 自动更新 |
 | 验证与交付 | 三平台 smoke test、架构感知测试、用户 README 与交付清单 |
 
-**依赖：** 按所选框架安装对应工具链（.NET / Rust / Python / Go / Kotlin / Swift 等），模板自带 PyInstaller、dotnet publish、Tauri 等打包方案；媒体模板可选 Playwright / ffmpeg，默认仅检测依赖，显式安装才下载。
+**依赖：** 按所选框架安装对应工具链（.NET / Rust / Python / Go / Kotlin / Swift 等），模板自带 PyInstaller、dotnet publish、Tauri 等打包方案；媒体/Web 数据模板可选 Playwright / ffmpeg / pytesseract，默认仅检测依赖，显式安装才下载。
 
 完整命令参考：[desktop-app-dev](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/desktop-app-dev/SKILL.md)
 
@@ -332,4 +335,4 @@ flowchart TB
     end
 ```
 
-八个技能均可独立安装。`multi-db-analyzer` 为纯 Python 实现，`java-superpowers-contract` 附带三语言工具链，`token-economizer` 为纯指令契约零依赖；`desktop-app-dev` 与 `mobile-app-dev` 提供跨平台打包与验证模板，`scraper-unblocker` 负责合规网络采集与媒体深爬，`manga-drama-video` 与 `manga-drama-video-helper` 负责 AI 漫剧视频制作。
+八个技能均可独立安装。`multi-db-analyzer` 为纯 Python 实现，`java-superpowers-contract` 附带三语言工具链，`token-economizer` 为纯指令契约零依赖；`desktop-app-dev` 提供跨平台桌面交付、媒体与 Web 数据流水线模板，`mobile-app-dev` 提供跨平台移动应用打包与验证模板，`scraper-unblocker` 负责合规网络采集与媒体深爬，`manga-drama-video` 与 `manga-drama-video-helper` 负责 AI 漫剧视频制作。

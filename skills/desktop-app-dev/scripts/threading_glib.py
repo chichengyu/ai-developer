@@ -102,3 +102,7 @@ def cancelled() -> None:
 def poll_cancel(event: threading.Event, every: int = 16) -> None:
     if event.is_set():
         raise _Cancelled()
+
+
+if __name__ == "__main__":
+    print("desktop-app-dev threading_glib: import run_async / poll_cancel for GTK background work.")

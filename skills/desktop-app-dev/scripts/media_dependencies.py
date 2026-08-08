@@ -1,7 +1,7 @@
 """Runtime dependency manager for the media acquisition pipeline.
 
 Checks and installs:
-- Python packages: playwright, pycryptodome
+- Python packages: playwright, pycryptodome, pillow, pytesseract (OCR)
 - Chromium browser via `playwright install chromium`
 - Portable ffmpeg / ffprobe for Windows
 
@@ -34,7 +34,7 @@ FFMPEG_WINDOWS_URL = os.environ.get(
     "FFMPEG_DOWNLOAD_URL",
     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
 )
-PYTHON_PACKAGES = ["playwright", "pycryptodome"]
+PYTHON_PACKAGES = ["playwright", "pycryptodome", "pillow", "pytesseract"]
 
 
 def _noop_progress(stage: str, percent: float | None, message: str) -> None:
@@ -50,10 +50,16 @@ def check_status(runtime_dir: str | Path | None = None) -> dict:
     ffprobe = bool(shutil.which("ffprobe") or (bin_dir / ffprobe_name).exists())
     playwright_installed = importlib.util.find_spec("playwright") is not None
     pycryptodome_installed = importlib.util.find_spec("Crypto") is not None
+    ocr_installed = (
+        importlib.util.find_spec("PIL") is not None
+        and importlib.util.find_spec("pytesseract") is not None
+        and bool(shutil.which("tesseract"))
+    )
     chromium_browser = _chromium_browser_path().exists()
     return {
         "playwright": playwright_installed,
         "pycryptodome": pycryptodome_installed,
+        "ocr": ocr_installed,
         "chromium": playwright_installed and chromium_browser,
         "ffmpeg": bool(ffmpeg),
         "ffprobe": bool(ffprobe),
@@ -101,7 +107,7 @@ def install_dependencies(
 
     runtime = Path(runtime_dir) if runtime_dir else DEFAULT_RUNTIME_DIR
     runtime.mkdir(parents=True, exist_ok=True)
-    report("packages", 0.1, "installing playwright + pycryptodome")
+    report("packages", 0.1, "installing playwright + pycryptodome + OCR packages")
     result = subprocess.run(
         [sys.executable, "-m", "pip", "install", "--upgrade", *PYTHON_PACKAGES],
         capture_output=True,

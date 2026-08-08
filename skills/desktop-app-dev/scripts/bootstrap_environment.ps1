@@ -7,7 +7,8 @@
 #
 # Auto selection runs scripts/select_framework.py against the brief and
 # installs the winning framework's toolchain. Install actions use winget
-# and pip, so they need network access and user consent.
+# and pip, so they need network access and user consent. -DryRun always
+# wins over -Install: it only reports what would be installed.
 
 [CmdletBinding()]
 param(
@@ -23,6 +24,11 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $PSScriptRoot "find_python.ps1")
 $map = Get-Content -LiteralPath (Join-Path $root "toolchain_map.json") -Raw | ConvertFrom-Json
 
+if ($DryRun -and $Install) {
+    Write-Host "Dry run requested: install actions will be skipped." -ForegroundColor Cyan
+    $Install = $false
+}
+
 function Test-Toolchain {
     param($Toolchain)
     if (-not $Toolchain -or -not $Toolchain.check -or $Toolchain.check.Count -eq 0) {
@@ -32,11 +38,11 @@ function Test-Toolchain {
         return [bool](Get-ProjectPython)
     }
     $cmd = $Toolchain.check[0]
-    $args = @($Toolchain.check | Select-Object -Skip 1)
+    $cmdArgs = @($Toolchain.check | Select-Object -Skip 1)
     $found = Get-Command $cmd -ErrorAction SilentlyContinue
     if (-not $found) { return $false }
     try {
-        & $found.Source @args *> $null
+        & $found.Source @cmdArgs *> $null
         return $LASTEXITCODE -eq 0
     } catch {
         return $false
@@ -111,6 +117,13 @@ if ($Install -and $allPackages.Count -gt 0 -and (Test-Toolchain $map.toolchains.
 }
 
 if ($DryRun) {
+    if ($allPackages.Count -gt 0) {
+        if (Test-Toolchain $map.toolchains.python) {
+            Write-Host "Would run: pip install $($allPackages -join ' ')" -ForegroundColor Cyan
+        } else {
+            Write-Host "Would need Python first, then run: pip install $($allPackages -join ' ')" -ForegroundColor Yellow
+        }
+    }
     Write-Host ""
     Write-Host "Dry run finished; no changes were made." -ForegroundColor Cyan
     exit 0

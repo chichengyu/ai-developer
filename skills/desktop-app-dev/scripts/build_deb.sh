@@ -29,8 +29,9 @@ if [[ -z "$BIN_PATH" || ! -x "$BIN_PATH" ]]; then
     exit 1
 fi
 
-STAGE="stage_${PKG_NAME}_${VERSION}"
-rm -rf "$STAGE"
+STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/desktop-app-dev-deb.XXXXXX")"
+STAGE="$STAGE_DIR/root"
+trap 'rm -rf "$STAGE_DIR"' EXIT
 mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/bin" "$STAGE/usr/share/applications"
 
 cp "$BIN_PATH" "$STAGE/usr/bin/${PKG_NAME}"
@@ -62,7 +63,6 @@ EOF
 OUT="${PKG_NAME}_${VERSION}_${DEB_ARCH}.deb"
 echo "==> dpkg-deb --build $STAGE $OUT"
 fakeroot dpkg-deb --build "$STAGE" "$OUT"
-rm -rf "$STAGE"
 
 echo "==> Built: $OUT"
 echo "Next: optionally sign with debsigs; upload to a Debian repo, or distribute directly."

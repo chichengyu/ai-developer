@@ -3,7 +3,8 @@
 Playbook for a desktop media tool that crawls a website, extracts
 video / audio / images, downloads with chunked resume, transcodes with
 ffmpeg, and republishes to multiple platforms. It complements the
-`scripts/media_*.py`, `scripts/captcha_solver.py`,
+`scripts/media_*.py`, `scripts/page_data_parser.py`,
+`scripts/scrape_guard.py`, `scripts/captcha_solver.py`,
 `scripts/browser_session.py`, `scripts/task_queue.py`,
 `scripts/ffmpeg_transcoder.py`, and `scripts/platform_publisher.py`
 templates in this skill. The engine is exposed to every desktop UI
@@ -173,11 +174,25 @@ thread plus a short `busy_timeout`, or serialize writes behind one
 1. Use one persistent session with cookies, user-agent, and optional
    proxy from `scripts/media_session.py`.
 2. Fetch the page, parse links with `scripts/media_parser.py`.
-3. Extract direct media URLs (`video`, `audio`, `img`, `source`,
+3. Deep-parse the page with `scripts/page_data_parser.py`
+   (`analyze_page()`): metadata, JSON-LD / `application/json` state,
+   Next.js / Nuxt / global-state scripts, embedded JSON media and API
+   fields, pagination fields, and API endpoints from `fetch` / XHR /
+   axios / forms / preloads / script tags. It also derives Next.js
+   `/_next/data/<buildId><page>.json` routes from `__NEXT_DATA__`, and
+   reports detected CAPTCHA challenges. The same analysis runs from a
+   CLI: `python scripts/page_data_parser.py --url <page-url>`.
+4. For SPA / API-driven pages, `scripts/browser_session.py`
+   (`capture_page_data()`) records runtime `xhr` / `fetch` / WebSocket
+   traffic with method, status, content type, size, and JSON bodies,
+   then combines the network capture with the static parse.
+5. Extract direct media URLs (`video`, `audio`, `img`, `source`,
    `poster`, `data-src`, `srcset`) and HLS playlists (`m3u8`).
-4. Normalize relative URLs against the page URL.
-5. Enqueue one task per media URL with `dedupe_key`.
-6. Rate-limit requests and honor `robots.txt` / platform terms where
+6. Normalize relative URLs against the page URL or `<base href>`.
+7. Enqueue one task per media URL with `dedupe_key`. For deep analysis
+   only, enqueue `kind: "analyze"`; `crawl` accepts `"deep": true` to
+   include the same page-data summary in its result.
+8. Rate-limit requests and honor `robots.txt` / platform terms where
    possible; aggressive crawling risks IP blocks and account bans.
 
 ## 8. HLS / m3u8
@@ -196,10 +211,39 @@ thread plus a short `busy_timeout`, or serialize writes behind one
 
 `scripts/captcha_solver.py` defines a uniform interface:
 
-- `solve_image()` for image CAPTCHA
-- `solve_recaptcha_v2()` / `solve_hcaptcha()` / `solve_turnstile()` for
-  site-key challenges
-- `ManualCaptchaSolver` for a UI dialog when automation is not possible
+- `detect_captchas()` auto-recognizes reCAPTCHA v2/v3, hCaptcha,
+  Turnstile, Geetest, and image CAPTCHA scripts/elements on a page
+- `CaptchaSolver.solve_image()` / `solve_recaptcha_v2()` /
+  `solve_recaptcha_v3()` / `solve_hcaptcha()` / `solve_turnstile()` /
+  `solve_geetest()` for third-party service calls
+- `AutoCaptchaSolver` detects a page's challenges and solves them through
+  the third-party service without a manual dialog
+- `ManualCaptchaSolver` remains an explicit opt-in fallback
+
+Full-auto login flow:
+
+```python
+from captcha_solver import AutoCaptchaSolver, CaptchaSolver
+from browser_session import BrowserSession
+
+solver = AutoCaptchaSolver(CaptchaSolver(api_key="from-encrypted-config"))
+session = BrowserSession()
+session.start()
+session.login(
+    url,
+    username,
+    password,
+    username_selector,
+    password_selector,
+    submit_selector,
+    auto_captcha_solver=solver,
+    max_captcha_retries=3,
+)
+```
+
+`BrowserSession.solve_captchas_auto()` can also be called directly after a
+page load; it detects challenges, solves them, and fills the response
+fields in the page.
 
 Third-party solving services normally follow a two-step pattern:
 
@@ -217,10 +261,27 @@ challenge; many platforms require human confirmation.
 
 `scripts/browser_session.py` provides a Playwright session with:
 
-- Stable user agent, locale, timezone, viewport, and platform settings
+- Stable user agent, locale, timezone, viewport, screen, platform,
+  languages, hardware concurrency, device memory, and color scheme;
+  `FingerprintOptions.generate(seed=...)` creates one stable profile per
+  account and `save()/load()` persist it
 - Cookie persistence between runs
 - Proxy support
-- Login flow with optional CAPTCHA callback
+- Runtime XHR/fetch/WebSocket capture (`capture_page_data()`)
+- Auto CAPTCHA detect/solve (`solve_captchas_auto()`)
+- Optional action pacing (`action_interval` / `action_jitter`)
+
+`scripts/scrape_guard.py` adds polite HTTP-side protection for
+`scripts/media_session.py`:
+
+- `RateLimiter` -- minimum interval plus random jitter
+- `RetryPolicy` -- exponential backoff with `Retry-After` support
+- `RobotsPolicy` -- robots.txt allow/deny and crawl-delay checks
+- `AdaptiveThrottle` -- increases pacing after 403/429/5xx, eases on success
+
+The sidecar accepts these as task payload options (`min_interval`,
+`jitter`, `max_retries`, `backoff_base`, `backoff_max`, `robots_text`,
+`adaptive_throttle`), so every crawl/download/analyze task can be paced.
 
 Good practices:
 
@@ -271,6 +332,11 @@ adapter explicitly shares it.
 - Table pagination (UI-07) maps to `list_tasks(limit, offset)`.
 - Auto-refresh interval (UI-09) re-queries the table; it does not replace
   live progress events.
+- Advanced automation: rotating proxies (`scripts/proxy_pool.py`),
+  multi-account leases (`scripts/account_manager.py`), recurring schedules
+  (`scripts/task_scheduler.py`), and completion notifications
+  (`scripts/notifier.py`) integrate through the sidecar; see
+  `references/web_data_pipeline_playbook.md` sections 9-12.
 
 ## 14. Compliance
 

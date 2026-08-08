@@ -11,6 +11,8 @@ issue and tick each one.
 ### Build artefacts
 
 - [ ] `dist\<AppName>.exe` (or platform equivalent) builds clean with no warnings.
+- [ ] The deliverable is a single distributable artifact (EXE or documented installer); recipients need no runtime install.
+- [ ] EXE / installer size is recorded and meets the Step 0 size budget.
 - [ ] EXE is code-signed (Authenticode / codesign / debsigs / AppImage signing).
 - [ ] EXE is reproducible from a clean clone on a fresh CI runner.
 - [ ] `scripts/test_arch_awareness.ps1` passes locally and on CI.
@@ -22,6 +24,7 @@ issue and tick each one.
   - [ ] EXE double-click launches the main window.
   - [ ] No .NET runtime install dialog appears (self-contained or NativeAOT).
   - [ ] No missing-DLL error on first run.
+  - [ ] Idle memory is measured (Task Manager: `<AppName>.exe`) and meets the Step 0 memory budget.
   - [ ] No AV warning on first run (or the recipient's AV is whitelisted).
   - [ ] First launch writes the expected log file under `%LOCALAPPDATA%`.
 - [ ] macOS 14+ sandbox VM:
@@ -38,6 +41,9 @@ issue and tick each one.
 - [ ] The showstopper from Step 0 is verified one more time before sign-off.
 - [ ] `界面硬性要求` UI-01..UI-18 from
   `references/ui_hard_requirements.md` pass on the target OS.
+- [ ] `代码开发硬性要求` CODE-01..CODE-05 from `SKILL.md` pass;
+  working original logic preserved unless a behavior change is recorded
+  in requirements.md.
 - [ ] Settings persistence survives an uninstall + reinstall cycle.
 - [ ] Media runtime one-click install verified on a clean machine
   (Playwright + Chromium + ffmpeg / ffprobe + pycryptodome).

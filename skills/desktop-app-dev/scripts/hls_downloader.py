@@ -194,3 +194,7 @@ def download_hls(
         total_segments=total,
         output_dir=output_dir,
     )
+
+
+if __name__ == "__main__":
+    print("desktop-app-dev hls_downloader: import download_hls() for m3u8 segment downloads.")

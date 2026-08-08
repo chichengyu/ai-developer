@@ -56,12 +56,13 @@ class JobRunner(Generic[T]):
     def __post_init__(self) -> None:
         self.signals = _JobSignals()
         self._thread = QThread()
-        self._worker = _Worker(self.job, self.signals, self.auto_delete)
+        self._worker = _Worker(self.job, self.signals)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
+        if self.auto_delete:
+            self._worker.finished.connect(self._worker.deleteLater)
+            self._thread.finished.connect(self._thread.deleteLater)
         self._token: JobRunner.CancelToken | None = None
 
     def start(self) -> None:
@@ -84,11 +85,10 @@ class JobRunner(Generic[T]):
 
 
 class _Worker(QObject):
-    def __init__(self, job, signals, auto_delete: bool) -> None:
+    def __init__(self, job, signals) -> None:
         super().__init__()
         self._job = job
         self.signals = signals
-        self._auto_delete = auto_delete
         self.token: JobRunner.CancelToken | None = None
 
     @Slot()

@@ -23,7 +23,9 @@ param(
     [Alias("Arch")]
     [string] $Rid = "win-x64",
     [string] $Configuration = "Release",
-    [string] $OutputDir = "dist"
+    [bool] $InvariantGlobalization = $true,   # drop ICU data; disable for localized apps
+    [string] $OutputDir = "dist",
+    [switch] $BackupSource             # timestamped source zip before packaging
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,6 +52,15 @@ foreach ($pkg in $reflectionHints) {
     }
 }
 
+if ($BackupSource) {
+    Write-Host "==> Backing up source before packaging" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "backup_source.ps1") `
+        -SourcePath (Get-Location).Path `
+        -OutputDir (Join-Path $OutputDir "source_backup") `
+        -Name ([System.IO.Path]::GetFileNameWithoutExtension($Project))
+    if ($LASTEXITCODE -ne 0) { throw "Source backup failed" }
+}
+
 Write-Host "==> dotnet publish (NativeAOT, $Rid, $Configuration)" -ForegroundColor Cyan
 $pubArgs = @(
     "publish", $Project,
@@ -60,8 +71,13 @@ $pubArgs = @(
     "-p:PublishSingleFile=true",
     "-p:OptimizationPreference=Size",
     "-p:IlcOptimizationPreference=Size",
+    "-p:DebugType=None",
+    "-p:DebugSymbols=false",
     "-o", $OutputDir
 )
+if ($InvariantGlobalization) {
+    $pubArgs += "-p:InvariantGlobalization=true"
+}
 dotnet @pubArgs
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (check IL warnings above)" }
 

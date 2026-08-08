@@ -20,10 +20,21 @@ param(
     [string] $Arch = "x64",
     [string] $Configuration = "Release",
     [string] $OutputDir = "dist",
-    [switch] $Install                  # install missing tauri-cli / Rust target / PyInstaller; default is check-only
+    [switch] $Install,                 # install missing tauri-cli / Rust target / PyInstaller; default is check-only
+    [switch] $BackupSource             # timestamped source zip before packaging
 )
 
 $ErrorActionPreference = "Stop"
+
+$backupName = if ($Project -and $Project -ne ".") { Split-Path -Leaf $Project } else { Split-Path -Leaf (Get-Location).Path }
+if ($BackupSource) {
+    Write-Host "==> Backing up source before packaging" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "backup_source.ps1") `
+        -SourcePath (Get-Location).Path `
+        -OutputDir (Join-Path $OutputDir "source_backup") `
+        -Name $backupName
+    if ($LASTEXITCODE -ne 0) { throw "Source backup failed" }
+}
 
 # Map friendly Arch to dotnet RID and Rust triple.
 $archMap = @{
@@ -41,7 +52,10 @@ if ($Tool -eq "dotnet") {
     }
     Write-Host "==> dotnet publish -r $($entry.Rid)" -ForegroundColor Cyan
     dotnet publish $Project -c $Configuration -r $entry.Rid --self-contained true `
-        -p:PublishSingleFile=true -o $OutputDir
+        -p:PublishSingleFile=true `
+        -p:EnableCompressionInSingleFile=true `
+        -p:DebugType=None -p:DebugSymbols=false `
+        -o $OutputDir
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 }
 elseif ($Tool -eq "cargo") {
@@ -60,6 +74,11 @@ elseif ($Tool -eq "cargo") {
     } else {
         Write-Host "==> Ensure Rust target is installed: rustup target add $($entry.Triple) (or pass -Install)" -ForegroundColor Yellow
     }
+    $env:CARGO_PROFILE_RELEASE_OPT_LEVEL = "z"
+    $env:CARGO_PROFILE_RELEASE_LTO = "true"
+    $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1"
+    $env:CARGO_PROFILE_RELEASE_PANIC = "abort"
+    $env:CARGO_PROFILE_RELEASE_STRIP = "true"
     Push-Location $Project
     try {
         & cargo tauri build --target $entry.Triple
@@ -72,6 +91,7 @@ elseif ($Tool -eq "go") {
     }
     $env:GOOS = "linux"
     $env:GOARCH = $entry.GoArch
+    $env:GOFLAGS = "$($env:GOFLAGS) -trimpath -buildvcs=false"
     Write-Host "==> GOOS=linux GOARCH=$($entry.GoArch) go build" -ForegroundColor Cyan
     Push-Location $Project
     try {
@@ -93,9 +113,14 @@ elseif ($Tool -eq "python") {
         & $py3.Source -m pip install pyinstaller
         if ($LASTEXITCODE -ne 0) { throw "PyInstaller install failed" }
     }
-    & $py3.Source -m PyInstaller --onefile --name myapp $Project
+    & $py3.Source -m PyInstaller --onefile --windowed --noupx --name myapp $Project
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 }
 
+Get-ChildItem -Path $OutputDir -Recurse -File -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        $size = $_.Length
+        Write-Host ("==> Artifact: {0} ({1:N1} MB / {2:N0} KB)" -f $_.FullName, ($size / 1MB), ($size / 1KB)) -ForegroundColor Green
+    }
 Write-Host "==> Done. Next: package as .deb / .rpm / AppImage / Flatpak / Snap" -ForegroundColor Green
 Write-Host "  See scripts/build_appimage.sh, scripts/build_deb.sh." -ForegroundColor Yellow

@@ -13,6 +13,7 @@ CHANGELOG.md          what changed and when
 INDEX.md              topic-based navigation
 LICENSE               MIT
 pyproject.toml        ruff + mypy config
+requirements-dev.txt  pinned ruff / mypy / types-requests
 .editorconfig         editor formatting
 .gitignore            skill-internal ignores
 .pre-commit-config.yaml  pre-commit hooks
@@ -45,7 +46,9 @@ tests/                smoke tests + fixtures
 Smoke coverage is automatic: `tests/smoke_windows.ps1`,
 `tests/smoke_macos.sh`, and `tests/smoke_linux.sh` run
 `python -c "import ast; ast.parse(...)"` on every `.py` in `scripts/` and
-`examples/`. `tests/test_no_bom.py` rejects BOM / U+FEFF bytes.
+`examples/`. `tests/test_threading_templates.py` verifies every threading
+template exposes cancellation, progress, an error path, and a safe UI
+bridge. `tests/test_no_bom.py` rejects BOM / U+FEFF bytes.
 
 ## Adding a new window-enumeration language
 
@@ -62,10 +65,14 @@ Same pattern as SendInput but export:
 
 1. Add a `scripts/build_<framework>.ps1` (or `.sh`) that accepts
    `-Arch x64|arm64|x86` (or the framework's native equivalent) with
-   a `[ValidateSet(...)]`. See the existing 14 `build_*.ps1` files.
+   a `[ValidateSet(...)]`, and accepts `-BackupSource` to run
+   `scripts/backup_source.ps1` before packaging. See the existing 14 `build_*.ps1` files.
 2. If the framework uses a threading model not covered by the existing
    `threading_*` templates, add a new
-   `scripts/threading_<framework>.<ext>`.
+   `scripts/threading_<framework>.<ext>` following the worker contract in
+   `references/threading_playbook.md` (start, cancel, progress, done, error,
+   UI bridge), add it to `tests/test_threading_templates.py`, and register
+   it in the playbook template map.
 3. Add a deep-dive section to `references/framework_matrix.md` and a
    canonical framework entry to `scripts/select_framework.py`.
 4. Add the script to `tests/test_arch_awareness.ps1` so the
@@ -106,7 +113,7 @@ Same pattern as SendInput but export:
 ## Pre-commit checks
 
 ```bash
-pip install ruff pre-commit
+pip install -r requirements-dev.txt pre-commit
 pre-commit install
 pre-commit run --all-files
 ```

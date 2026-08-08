@@ -5,8 +5,9 @@
 //   var worker = new BackgroundTask(token => LongJob(token, progress),
 //                                   onProgress: UpdateProgress,
 //                                   onDone:     r => Status = `$"done: {r}"`,
-//                                   onError:    e => Status = `$"error: {e.Message}"`);
-//   worker.Start();
+//                                   onError:    e => Status = `$"error: {e.Message}"`,
+//                                   onCancel:   () => Status = "cancelled");
+//   worker.Start(DispatcherQueue.GetForCurrentThread());
 //   // later: worker.Cancel();
 //
 // Why a separate template from `threading_wpf.cs`?
@@ -19,6 +20,7 @@
 //     DispatcherQueue thread, including setting `TextBlock.Text`,
 //     `ProgressBar.Value`, and `Button.IsEnabled`.
 
+#nullable enable
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,17 +29,20 @@ using Microsoft.UI.Dispatching;
 public sealed class BackgroundTask
 {
     private readonly Func<CancellationToken, IProgress<object>, object> _job;
-    private readonly Action<object> _onDone;
-    private readonly Action<Exception> _onError;
-    private readonly Action<object> _onProgress;
+    private readonly Action<object>? _onDone;
+    private readonly Action<Exception>? _onError;
+    private readonly Action<object>? _onProgress;
+    private readonly Action? _onCancel;
 
     public BackgroundTask(
         Func<CancellationToken, IProgress<object>, object> job,
-        Action<object> onDone,
-        Action<Exception> onError,
-        Action<object> onProgress)
+        Action<object>? onDone = null,
+        Action<Exception>? onError = null,
+        Action<object>? onProgress = null,
+        Action? onCancel = null)
     {
         _job = job; _onDone = onDone; _onError = onError; _onProgress = onProgress;
+        _onCancel = onCancel;
     }
 
     private CancellationTokenSource? _cts;
@@ -51,17 +56,28 @@ public sealed class BackgroundTask
         _dispatcher = uiDispatcher;
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
-        var progress = new Progress<object>(p => _dispatcher.TryEnqueue(() => _onProgress(p)));
+        var progress = new Progress<object>(p => _dispatcher.TryEnqueue(() => _onProgress?.Invoke(p)));
 
         Task.Run(() =>
         {
             try
             {
                 var result = _job(token, progress);
-                _dispatcher.TryEnqueue(() => _onDone(result));
+                _dispatcher.TryEnqueue(() => _onDone?.Invoke(result));
             }
-            catch (OperationCanceledException) { /* expected on cancel */ }
-            catch (Exception ex) { _dispatcher.TryEnqueue(() => _onError(ex)); }
+            catch (OperationCanceledException)
+            {
+                _dispatcher.TryEnqueue(() => _onCancel?.Invoke());
+            }
+            catch (Exception ex)
+            {
+                _dispatcher.TryEnqueue(() => _onError?.Invoke(ex));
+            }
+            finally
+            {
+                _cts?.Dispose();
+                _cts = null;
+            }
         }, token);
     }
 

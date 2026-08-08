@@ -35,16 +35,31 @@ function Step($name, $block) {
     Write-Host "  [OK]   $name" -ForegroundColor Green
 }
 
+function Get-DevRequirement {
+    param([string] $Module)
+    $spec = Get-Content (Join-Path $root "requirements-dev.txt") |
+        Where-Object { $_ -and $_.Trim() -like "$Module*" } |
+        Select-Object -First 1
+    if (-not $spec) {
+        throw "requirements-dev.txt missing entry for $Module"
+    }
+    $spec.Trim()
+}
+
 function Ensure-Tool {
-    param([string] $Module, [string] $Version)
-    & $py -c "import $Module" 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    param([string] $Module, [string] $Spec)
+    $expectedMatch = [regex]::Match($Spec, "==(.+)$")
+    $expected = if ($expectedMatch.Success) { $expectedMatch.Groups[1].Value.Trim() } else { $null }
+    $pipShow = & $py -m pip show $Module 2>&1 | Out-String
+    $versionMatch = [regex]::Match($pipShow, "(?m)^Version:\s*(\S+)")
+    $ok = $versionMatch.Success -and (-not $expected -or $versionMatch.Groups[1].Value -eq $expected)
+    if (-not $ok) {
         if (-not $InstallDeps) {
-            Write-Host "  [MISSING] $Module==$Version. Re-run with -InstallDeps or run: & `"$py`" -m pip install `"$Module==$Version`"" -ForegroundColor Yellow
+            Write-Host "  [MISSING] $Spec. Re-run with -InstallDeps or run: & `"$py`" -m pip install `"$Spec`"" -ForegroundColor Yellow
             exit 1
         }
-        & $py -m pip install --quiet "$Module==$Version"
-        if ($LASTEXITCODE -ne 0) { throw "pip install failed for $Module==$Version" }
+        & $py -m pip install --quiet "$Spec"
+        if ($LASTEXITCODE -ne 0) { throw "pip install failed for $Spec" }
     }
 }
 
@@ -54,7 +69,7 @@ try {
     if (-not $psShell) { $psShell = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
     if (-not $psShell) { throw "PowerShell not found for tests/test_arch_awareness.ps1" }
     if (-not $SkipRuff) {
-        Ensure-Tool "ruff" "0.6.9"
+        Ensure-Tool "ruff" (Get-DevRequirement "ruff")
         Step "ruff check" {
             & $py -m ruff check scripts/ tests/ examples/
         }
@@ -63,7 +78,8 @@ try {
         }
     }
     if (-not $SkipMyPy) {
-        Ensure-Tool "mypy" "1.13.0"
+        Ensure-Tool "mypy" (Get-DevRequirement "mypy")
+        Ensure-Tool "types-requests" (Get-DevRequirement "types-requests")
         Step "mypy scripts/" {
             & $py -m mypy scripts/
         }

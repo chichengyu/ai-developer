@@ -20,7 +20,7 @@ _URL_ATTRS = ("src", "data-src", "data-original", "poster", "href")
 def normalize_url(url: str, base_url: str | None = None) -> str:
     """Resolve a relative URL against the page/base URL."""
     url = url.strip()
-    if url.startswith(("http://", "https://", "data:", "blob:")):
+    if url.startswith(("http://", "https://", "data:", "blob:", "ws:", "wss:")):
         return url
     if base_url:
         return urllib.parse.urljoin(base_url, url)
@@ -40,11 +40,17 @@ class _MediaHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.found: list[tuple[str, list[str]]] = []
+        self.base_href: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {name.lower(): value or "" for name, value in attrs}
+        if tag == "base":
+            href = attr_map.get("href", "").strip()
+            if href:
+                self.base_href = href
+            return
         if tag not in _MEDIA_TAGS:
             return
-        attr_map = {name.lower(): value or "" for name, value in attrs}
         urls: list[str] = []
         for attr in _URL_ATTRS:
             value = attr_map.get(attr, "").strip()
@@ -75,10 +81,11 @@ def extract_media_urls(html: str, base_url: str | None = None) -> MediaExtractio
     """Extract video/audio/image/HLS URLs from an HTML document."""
     parser = _MediaHTMLParser()
     parser.feed(html)
+    effective_base = normalize_url(parser.base_href, base_url) if parser.base_href else base_url
     result = MediaExtraction()
     for tag, urls in parser.found:
         for url in urls:
-            normalized = normalize_url(url, base_url)
+            normalized = normalize_url(url, effective_base)
             if normalized.startswith("blob:") or normalized.startswith("data:"):
                 continue
             if ".m3u8" in normalized.lower():
@@ -214,3 +221,9 @@ def choose_best_variant(playlist: M3U8Playlist) -> M3U8Variant | None:
     if not playlist.variants:
         return None
     return max(playlist.variants, key=lambda item: item.bandwidth)
+
+
+if __name__ == "__main__":
+    print(
+        "desktop-app-dev media_parser: import parse_m3u8() / extract_media_urls() for page and HLS parsing."
+    )

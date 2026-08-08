@@ -95,11 +95,23 @@ print('OK')
         $LASTEXITCODE -eq 0
     }
     Run-Test "test_media_pipeline.py" {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         & $py "$root\tests\test_media_pipeline.py" 2>&1 | Out-Null
-        $LASTEXITCODE -eq 0
+        $code = $LASTEXITCODE
+        $ErrorActionPreference = $previous
+        $code -eq 0
     }
     Run-Test "test_no_bom.py" {
         & $py "$root\tests\test_no_bom.py" 2>&1 | Out-Null
+        $LASTEXITCODE -eq 0
+    }
+    Run-Test "test_threading_templates.py" {
+        & $py "$root\tests\test_threading_templates.py" 2>&1 | Out-Null
+        $LASTEXITCODE -eq 0
+    }
+    Run-Test "test_threading_concurrency.py" {
+        & $py "$root\tests\test_threading_concurrency.py" 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
     }
     Run-Test "game-automation example imports" {
@@ -151,6 +163,15 @@ if ($py) {
     Run-Test "bootstrap_environment.ps1 dry-run (python)" {
         powershell -ExecutionPolicy Bypass -File "$root\scripts\bootstrap_environment.ps1" -Framework python -DryRun 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
+    }
+    Run-Test "bootstrap_environment.ps1 dry-run wins over -Install" {
+        $out = powershell -ExecutionPolicy Bypass -File "$root\scripts\bootstrap_environment.ps1" `
+            -Framework python -DryRun -Install -PythonPackages "__never_installed__" 2>&1
+        $exit = $LASTEXITCODE
+        $text = $out -join "`n"
+        $exit -eq 0 -and $text -match "Dry run finished" -and
+        $text -notmatch "==> pip install" -and
+        $text -notmatch "==> winget install"
     }
     Run-Test "C# template compile (dotnet, skipped if absent)" {
         $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -226,6 +247,73 @@ Run-Test "backup_source.ps1 excludes exact segment names only" {
         if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
     }
 }
+Run-Test "all build_*.ps1 support -BackupSource" {
+    $missing = Get-ChildItem "$scriptsDir" -Filter "build_*.ps1" | Where-Object {
+        $text = Get-Content $_.FullName -Raw
+        $text -notmatch '\[switch\] \$BackupSource' -or $text -notmatch 'backup_source\.ps1'
+    }
+    $missing.Count -eq 0
+}
+Run-Test "build_qt.ps1 refuses staging removal over source" {
+    $text = Get-Content (Join-Path $scriptsDir "build_qt.ps1") -Raw
+    $text -match 'Refusing to remove'
+}
+
+# 3.6 Packaging optimization defaults (single-file / no runtime / size / RAM)
+Write-Host ""
+Write-Host "--- packaging optimization ---"
+Run-Test "build_python.ps1 onefile + size defaults" {
+    $text = Get-Content (Join-Path $scriptsDir "build_python.ps1") -Raw
+    $text -match '"--onefile"' -and $text -match '"--windowed"' -and
+    $text -match '--noupx' -and $text -match '--exclude-module' -and
+    $text -match 'Built:'
+}
+Run-Test "build_dotnet.ps1 size defaults + R2R opt-in" {
+    $text = Get-Content (Join-Path $scriptsDir "build_dotnet.ps1") -Raw
+    $text -match 'EnableCompressionInSingleFile' -and $text -match 'DebugType=None' -and
+    $text -match 'InvariantGlobalization' -and $text -match 'if \(\$ReadyToRun\)'
+}
+Run-Test "build_dotnet_nativeaot.ps1 size + invariant globalization" {
+    $text = Get-Content (Join-Path $scriptsDir "build_dotnet_nativeaot.ps1") -Raw
+    $text -match 'IlcOptimizationPreference=Size' -and $text -match 'InvariantGlobalization' -and
+    $text -match 'DebugType=None'
+}
+Run-Test "build_qt.ps1 minimal deploy flags" {
+    $text = Get-Content (Join-Path $scriptsDir "build_qt.ps1") -Raw
+    $text -match '--no-translations' -and $text -match '--no-compiler-runtime' -and
+    $text -match 'Portable folder size'
+}
+Run-Test "build_tauri.ps1 nsis default + size profile" {
+    $text = Get-Content (Join-Path $scriptsDir "build_tauri.ps1") -Raw
+    $text -match 'Targets = @\("nsis"\)' -and $text -match 'CARGO_PROFILE_RELEASE_OPT_LEVEL' -and
+    $text -match 'Artifact:'
+}
+Run-Test "build_electron.ps1 compression + asar + warning" {
+    $text = Get-Content (Join-Path $scriptsDir "build_electron.ps1") -Raw
+    $text -match '-c.compression=maximum' -and $text -match '-c.asar=true' -and
+    $text -match 'prefer Tauri'
+}
+Run-Test "build_go_wails.ps1 strip/trimpath defaults" {
+    $text = Get-Content (Join-Path $scriptsDir "build_go_wails.ps1") -Raw
+    $text -match '\$Ldflags = "-s -w"' -and $text -match '\$Trimpath = \$true' -and
+    $text -match '-trimpath'
+}
+Run-Test "build_go_fyne.ps1 strip/no-console defaults" {
+    $text = Get-Content (Join-Path $scriptsDir "build_go_fyne.ps1") -Raw
+    $text -match '\[bool\] \$NoConsole = \$true' -and $text -match '\[bool\] \$Strip = \$true' -and
+    $text -match '-trimpath'
+}
+Run-Test "build_go_gio.ps1 strip/no-console defaults" {
+    $text = Get-Content (Join-Path $scriptsDir "build_go_gio.ps1") -Raw
+    $text -match '\[bool\] \$NoConsole = \$true' -and $text -match '\[bool\] \$Strip = \$true' -and
+    $text -match '-trimpath'
+}
+Run-Test "build_macos/linux size flags" {
+    $mac = Get-Content (Join-Path $scriptsDir "build_macos.ps1") -Raw
+    $linux = Get-Content (Join-Path $scriptsDir "build_linux.ps1") -Raw
+    $mac -match 'EnableCompressionInSingleFile' -and $linux -match 'EnableCompressionInSingleFile' -and
+    $linux -match '--noupx'
+}
 
 # 4. test_arch_awareness.ps1
 Write-Host ""
@@ -290,6 +378,24 @@ Run-Test "build_linux.ps1 uses Linux-compatible Go flags" {
 Run-Test "build_go_fyne.ps1 derives EXE name from AppId" {
     $text = Get-Content (Join-Path $scriptsDir "build_go_fyne.ps1") -Raw
     $text -notmatch 'env:AppId.*Substring'
+}
+
+# 6.5 Documented count sync. This check is not counted as a test because
+# it compares the final total with the numbers in tests/README.md and
+# SKILL.md, which must be updated whenever the suite changes.
+$readmeCount = [regex]::Match((Get-Content (Join-Path $root "tests\README.md") -Raw), "Passed:\s*(\d+)")
+$skillCount = [regex]::Match((Get-Content (Join-Path $root "SKILL.md") -Raw), "\((\d+)\s*/\s*\d+ currently pass")
+$docsMatch = $false
+if ($readmeCount.Success -and $skillCount.Success) {
+    $docsMatch = [int]$readmeCount.Groups[1].Value -eq $script:passes -and
+                 [int]$skillCount.Groups[1].Value -eq $script:passes
+}
+if ($docsMatch) {
+    Write-Host "  [OK]   documented Windows smoke count ($($script:passes))"
+} else {
+    Write-Host "  [FAIL] documented Windows smoke count: README/SKILL.md must report $($script:passes)" -ForegroundColor Red
+    $script:failures++
+    $script:failedTests += "documented Windows smoke count matches actual"
 }
 
 # Summary

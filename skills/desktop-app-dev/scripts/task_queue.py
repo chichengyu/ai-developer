@@ -71,6 +71,41 @@ class TaskRecord:
         )
 
 
+@dataclass
+class ScheduleRecord:
+    id: int
+    kind: str
+    payload: dict[str, Any]
+    schedule: dict[str, Any]
+    dedupe_key: str | None
+    priority: int
+    max_attempts: int
+    next_run_at: str | None
+    last_run_at: str | None
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> ScheduleRecord:
+        payload = json.loads(row["payload"]) if row["payload"] else {}
+        schedule = json.loads(row["schedule"]) if row["schedule"] else {}
+        return cls(
+            id=int(row["id"]),
+            kind=row["kind"],
+            payload=payload if isinstance(payload, dict) else {},
+            schedule=schedule if isinstance(schedule, dict) else {},
+            dedupe_key=row["dedupe_key"],
+            priority=int(row["priority"]),
+            max_attempts=int(row["max_attempts"]),
+            next_run_at=row["next_run_at"],
+            last_run_at=row["last_run_at"],
+            enabled=bool(row["enabled"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
 class TaskQueue:
     """Thread-safe SQLite queue with atomic claims and crash recovery."""
 
@@ -119,6 +154,30 @@ class TaskQueue:
                 ON tasks(status, priority, id)
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schedules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    schedule TEXT NOT NULL,
+                    dedupe_key TEXT,
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    max_attempts INTEGER NOT NULL DEFAULT 3,
+                    next_run_at TEXT,
+                    last_run_at TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_schedules_next_run
+                ON schedules(enabled, next_run_at)
+                """
+            )
             self._conn.commit()
 
     @staticmethod
@@ -137,6 +196,7 @@ class TaskQueue:
         priority: int = 0,
         max_attempts: int | None = None,
         resume_token: dict[str, Any] | None = None,
+        run_after: str | None = None,
     ) -> TaskRecord:
         now = self._now()
         attempts = max_attempts or self.default_max_attempts
@@ -146,9 +206,9 @@ class TaskQueue:
                     """
                     INSERT OR IGNORE INTO tasks (
                         kind, dedupe_key, payload, status, priority,
-                        attempts, max_attempts, progress, resume_token,
+                        attempts, max_attempts, progress, resume_token, run_after,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, 'queued', ?, 0, ?, 0, ?, ?, ?)
+                    ) VALUES (?, ?, ?, 'queued', ?, 0, ?, 0, ?, ?, ?, ?)
                     """,
                     (
                         kind,
@@ -157,6 +217,7 @@ class TaskQueue:
                         priority,
                         attempts,
                         json.dumps(resume_token, ensure_ascii=False) if resume_token else None,
+                        run_after,
                         now,
                         now,
                     ),
@@ -170,9 +231,9 @@ class TaskQueue:
                     """
                     INSERT INTO tasks (
                         kind, payload, status, priority, attempts,
-                        max_attempts, progress, resume_token,
+                        max_attempts, progress, resume_token, run_after,
                         created_at, updated_at
-                    ) VALUES (?, ?, 'queued', ?, 0, ?, 0, ?, ?, ?)
+                    ) VALUES (?, ?, 'queued', ?, 0, ?, 0, ?, ?, ?, ?)
                     """,
                     (
                         kind,
@@ -180,6 +241,7 @@ class TaskQueue:
                         priority,
                         attempts,
                         json.dumps(resume_token, ensure_ascii=False) if resume_token else None,
+                        run_after,
                         now,
                         now,
                     ),
@@ -314,6 +376,106 @@ class TaskQueue:
                 (TaskStatus.QUEUED.value, self._now(), task_id),
             )
             self._conn.commit()
+
+    def add_schedule(
+        self,
+        kind: str,
+        payload: dict[str, Any],
+        schedule: dict[str, Any],
+        dedupe_key: str | None = None,
+        priority: int = 0,
+        max_attempts: int | None = None,
+        next_run_at: str | None = None,
+    ) -> ScheduleRecord:
+        now = self._now()
+        attempts = max_attempts or self.default_max_attempts
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO schedules (
+                    kind, payload, schedule, dedupe_key, priority,
+                    max_attempts, next_run_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    kind,
+                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(schedule, ensure_ascii=False),
+                    dedupe_key,
+                    priority,
+                    attempts,
+                    next_run_at,
+                    now,
+                    now,
+                ),
+            )
+            row = self._conn.execute(
+                "SELECT * FROM schedules WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+            self._conn.commit()
+            return ScheduleRecord.from_row(row)
+
+    def get_schedule(self, schedule_id: int) -> ScheduleRecord | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM schedules WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+            return ScheduleRecord.from_row(row) if row else None
+
+    def list_schedules(self) -> list[ScheduleRecord]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM schedules ORDER BY id DESC").fetchall()
+            return [ScheduleRecord.from_row(row) for row in rows]
+
+    def due_schedules(self, now: str | None = None) -> list[ScheduleRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM schedules
+                WHERE enabled = 1
+                  AND next_run_at IS NOT NULL
+                  AND next_run_at <= ?
+                ORDER BY next_run_at ASC, id ASC
+                """,
+                (now or self._now(),),
+            ).fetchall()
+            return [ScheduleRecord.from_row(row) for row in rows]
+
+    def mark_schedule_run(self, schedule_id: int, next_run_at: str | None) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE schedules
+                SET last_run_at = ?, next_run_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (self._now(), next_run_at, self._now(), schedule_id),
+            )
+            self._conn.commit()
+
+    def remove_schedule(self, schedule_id: int) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM schedules WHERE id = ?",
+                (schedule_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def set_schedule_enabled(self, schedule_id: int, enabled: bool) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE schedules
+                SET enabled = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (1 if enabled else 0, self._now(), schedule_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def cancel(self, task_id: int) -> None:
         self._set_status(task_id, TaskStatus.CANCELLED.value)
@@ -455,3 +617,7 @@ class TaskQueue:
             "cancelled": duplicate_after.status == "cancelled",
             "stale_reset": stale_after.status == "queued",
         }
+
+
+if __name__ == "__main__":
+    print("desktop-app-dev task_queue: import TaskQueue for SQLite-backed task persistence.")

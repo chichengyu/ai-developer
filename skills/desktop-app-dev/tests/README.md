@@ -1,13 +1,15 @@
 # tests/
 
-Three OS smoke suites plus doc, media-pipeline, BOM, and arch structural
-tests, all runnable locally and on GitHub Actions across Windows / macOS /
-Ubuntu.
+Three OS smoke suites plus doc, media-pipeline, threading-template, BOM,
+and arch structural tests, all runnable locally and on GitHub Actions
+across Windows / macOS / Ubuntu.
 
 | Script                       | OS          | Purpose                                                  |
 |------------------------------|-------------|----------------------------------------------------------|
-| `smoke_windows.ps1`          | Windows     | all .ps1 parse + Python imports + fixtures + source backup + platform flags + arch check + BOM/examples AST|
+| `smoke_windows.ps1`          | Windows     | all .ps1 parse + Python imports + fixtures + source backup + packaging optimization + platform flags + arch check + BOM/examples AST|
 | `test_no_bom.py`             | any         | BOM / U+FEFF regression scan across text files |
+| `test_threading_templates.py`| any         | every threading template has cancel/progress/error and a UI bridge |
+| `test_threading_concurrency.py`| any       | runtime checks for the shared bounded worker pool (retry, cancel, progress) |
 | `smoke_macos.sh`             | macOS       | bash syntax + all .ps1 parse + Python + Swift -parse + doc/media tests|
 | `smoke_linux.sh`             | Linux       | bash syntax + all .ps1 parse + Python AST + doc/media tests|
 | `test_arch_awareness.ps1`    | Windows*    | Verifies every `build_*.ps1` has `-Arch` / `-Rid`        |
@@ -26,7 +28,7 @@ cd tests
 .\smoke_windows.ps1
 ```
 
-Expected output: `Passed: 77   Failed: 0` (varies slightly as scripts
+Expected output: `Passed: 110   Failed: 0` (varies slightly as scripts
 are added).
 
 ### macOS

@@ -16,6 +16,11 @@ real (non-toy) contexts. They either consume the canonical scripts in
 | `nativeaot-winforms/` | C# / WinForms + NativeAOT | single-file NativeAOT EXE |
 | `game-automation/`    | Python 3.12  | TLBB-style bot: window + SendInput + threading |
 
+For independent batch jobs, swap in the matching
+`scripts/threading_pool_*` template (Python / C# / Tauri / Compose /
+Electron) so the example gets aggregate progress, retry, and one
+`cancel()`.
+
 ## Why file-link / sys.path injection?
 
 The skill's `scripts/` directory is the single source of truth. Every

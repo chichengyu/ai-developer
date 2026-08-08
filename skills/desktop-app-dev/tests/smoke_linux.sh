@@ -123,6 +123,8 @@ if command -v python3 >/dev/null 2>&1; then
     run "test_docs.py" python3 "$SKILL_ROOT/tests/test_docs.py"
     run "test_media_pipeline.py" python3 "$SKILL_ROOT/tests/test_media_pipeline.py"
     run "test_no_bom.py" python3 "$SKILL_ROOT/tests/test_no_bom.py"
+    run "test_threading_templates.py" python3 "$SKILL_ROOT/tests/test_threading_templates.py"
+    run "test_threading_concurrency.py" python3 "$SKILL_ROOT/tests/test_threading_concurrency.py"
 fi
 
 # 6. Arch awareness (optional, requires PowerShell)

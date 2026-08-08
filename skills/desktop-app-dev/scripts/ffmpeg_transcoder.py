@@ -159,3 +159,7 @@ def transcode_file(
     if process.returncode != 0:
         raise TranscodeError("".join(stderr_lines)[-1000:])
     return dst
+
+
+if __name__ == "__main__":
+    print("desktop-app-dev ffmpeg_transcoder: import transcode_file() for ffmpeg transcoding.")

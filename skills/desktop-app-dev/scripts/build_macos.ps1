@@ -18,10 +18,21 @@ param(
     [string] $Arch = "arm64",
     [string] $Configuration = "Release",
     [string] $OutputDir = "dist",
-    [switch] $Install                  # install missing tauri-cli / Rust target; default is check-only
+    [switch] $Install,                 # install missing tauri-cli / Rust target; default is check-only
+    [switch] $BackupSource             # timestamped source zip before packaging
 )
 
 $ErrorActionPreference = "Stop"
+
+$backupName = if ($Project -and $Project -ne ".") { Split-Path -Leaf $Project } else { Split-Path -Leaf (Get-Location).Path }
+if ($BackupSource) {
+    Write-Host "==> Backing up source before packaging" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "backup_source.ps1") `
+        -SourcePath (Get-Location).Path `
+        -OutputDir (Join-Path $OutputDir "source_backup") `
+        -Name $backupName
+    if ($LASTEXITCODE -ne 0) { throw "Source backup failed" }
+}
 
 # Map our friendly Arch to Apple target triples and dotnet RIDs.
 $archMap = @{
@@ -39,7 +50,10 @@ if ($Tool -eq "dotnet") {
     }
     Write-Host "==> dotnet publish -r $($entry.Rid)" -ForegroundColor Cyan
     dotnet publish $Project -c $Configuration -r $entry.Rid --self-contained true `
-        -p:PublishSingleFile=true -o $OutputDir
+        -p:PublishSingleFile=true `
+        -p:EnableCompressionInSingleFile=true `
+        -p:DebugType=None -p:DebugSymbols=false `
+        -o $OutputDir
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 }
 elseif ($Tool -eq "cargo") {
@@ -59,6 +73,11 @@ elseif ($Tool -eq "cargo") {
     } else {
         Write-Host "==> Ensure Rust target is installed: rustup target add $($entry.Triple) (or pass -Install)" -ForegroundColor Yellow
     }
+    $env:CARGO_PROFILE_RELEASE_OPT_LEVEL = "z"
+    $env:CARGO_PROFILE_RELEASE_LTO = "true"
+    $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1"
+    $env:CARGO_PROFILE_RELEASE_PANIC = "abort"
+    $env:CARGO_PROFILE_RELEASE_STRIP = "true"
     Push-Location $Project
     try {
         & cargo tauri build --target $entry.Triple
@@ -71,6 +90,7 @@ elseif ($Tool -eq "xcode") {
     }
     & xcodebuild -project $Project -scheme (Split-Path $Project -LeafBase) -configuration $Configuration `
         -destination "generic/platform=$(if ($Arch -eq 'arm64') {'macOS'} else {'macOS'}),arch=$($entry.Xcode)" `
+        "SWIFT_OPTIMIZATION_LEVEL=-Osize" `
         -derivedDataPath "$OutputDir/derived"
     if ($LASTEXITCODE -ne 0) { throw "xcodebuild failed" }
 }

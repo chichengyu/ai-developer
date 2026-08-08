@@ -15,6 +15,10 @@ Endpoints:
   GET  /tasks/<id>            one task
   POST /tasks/<id>/pause|resume|cancel
   POST /workers/start|stop
+  GET/POST/DELETE /proxy-pools, GET /proxy-pools/<name>
+  GET/POST/DELETE /accounts, POST /accounts/<name>/acquire|release
+  GET/POST /schedules, DELETE /schedules/<id>, POST /schedules/<id>/pause|resume
+  GET /notifications/status, POST /notifications/test
 
 Optional auth: pass `--token` and send
 `Authorization: Bearer <token>` on every request except `/health`.
@@ -30,15 +34,21 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+from account_manager import AccountManager
 from media_dependencies import check_status, install_dependencies
 from media_downloader import download_file, safe_output_name
+from notifier import Notifier
+from proxy_pool import ProxyPool, ProxyPoolStore
 from task_queue import TaskQueue, TaskRecord
+from task_scheduler import TaskScheduler
 
 MAX_REQUEST_BODY = 16 * 1024 * 1024
 
@@ -66,8 +76,15 @@ class MediaPipelineService:
         runtime_dir: str | Path | None = None,
         workers: int = 2,
         token: str | None = None,
+        accounts_path: str | Path | None = None,
+        proxy_pools_path: str | Path | None = None,
+        notifications: dict[str, Any] | None = None,
     ) -> None:
         self.queue = TaskQueue(db_path)
+        self.scheduler = TaskScheduler(self.queue)
+        self.accounts = AccountManager(accounts_path)
+        self.proxy_pools = ProxyPoolStore(proxy_pools_path)
+        self.notifier = Notifier.from_config(notifications)
         self.runtime_dir = runtime_dir
         self.workers = workers
         self.token = token
@@ -75,12 +92,15 @@ class MediaPipelineService:
         self._stop = threading.Event()
         self._install_lock = threading.Lock()
         self._progress_lock = threading.Lock()
+        self._events_lock = threading.Lock()
+        self._task_events: dict[int, list[dict[str, Any]]] = {}
         self._installing = False
         self._install_progress: dict[str, Any] = {
             "stage": "",
             "percent": None,
             "message": "",
         }
+        self._scheduler_thread: threading.Thread | None = None
         self.queue.reset_stale_running()
 
     def start_workers(self) -> None:
@@ -90,12 +110,24 @@ class MediaPipelineService:
         self._pool = ThreadPoolExecutor(max_workers=self.workers)
         for _ in range(self.workers):
             self._pool.submit(self._worker_loop)
+        self._scheduler_thread = threading.Thread(
+            target=self._scheduler_loop,
+            daemon=True,
+        )
+        self._scheduler_thread.start()
 
     def stop_workers(self) -> None:
         self._stop.set()
         if self._pool is not None:
             self._pool.shutdown(wait=False)
             self._pool = None
+        self._scheduler_thread = None
+
+    def _scheduler_loop(self) -> None:
+        while not self._stop.is_set():
+            with suppress(Exception):
+                self.scheduler.enqueue_due()
+            time.sleep(1)
 
     def _worker_loop(self) -> None:
         while not self._stop.is_set():
@@ -103,23 +135,102 @@ class MediaPipelineService:
             if task is None:
                 time.sleep(0.5)
                 continue
+            account_name = task.payload.get("account")
+            account = None
+            success = False
+            if account_name:
+                account = self.accounts.acquire(str(account_name))
+                if account is None:
+                    self.queue.fail(
+                        task.id,
+                        f"account unavailable or in use: {account_name}",
+                        retry=True,
+                        delay_seconds=float(task.payload.get("retry_delay_seconds", 5.0)),
+                    )
+                    self._notify_task(task.id)
+                    continue
             try:
-                result = self._run_task(task)
+                result = self._run_task(task, account=account)
                 self.queue.succeed(task.id, result_path=str(result) if result else None)
+                success = True
             except Exception as exc:
-                self.queue.fail(task.id, str(exc), retry=True)
+                self.queue.fail(
+                    task.id,
+                    str(exc),
+                    retry=bool(task.payload.get("auto_retry", True)),
+                    delay_seconds=float(task.payload.get("retry_delay_seconds", 0.0)),
+                )
+            finally:
+                if account_name and account is not None:
+                    self.accounts.release(
+                        str(account_name),
+                        success=success,
+                        error=None if success else "task failed",
+                    )
+            self._notify_task(task.id)
 
-    def _run_task(self, task: TaskRecord) -> str | None:
+    def _run_task(
+        self,
+        task: TaskRecord,
+        account: dict[str, Any] | None = None,
+    ) -> str | None:
         payload = task.payload
+        if task.kind == "analyze":
+            from page_data_parser import analyze_page
+
+            url = payload["url"]
+            session = self._build_session(
+                payload,
+                account=account,
+                proxy_pool_store=self.proxy_pools,
+            )
+            body, _ = session.get_bytes(url)
+            analysis = analyze_page(
+                body.decode("utf-8", "replace"),
+                base_url=payload.get("base_url") or url,
+            )
+            return json.dumps(
+                analysis.to_dict(include_data=bool(payload.get("include_data", True))),
+                ensure_ascii=False,
+            )
+        if task.kind == "webdata":
+            from web_data_pipeline import WebDataPipeline
+
+            config = payload.get("config")
+            if not isinstance(config, dict):
+                raise ValueError("webdata payload config must be an object")
+            config = dict(config)
+            if account:
+                config = self._apply_account(config, account)
+            if payload.get("proxy_pool") and "proxy_pool" not in config:
+                config["proxy_pool"] = payload["proxy_pool"]
+            output = payload.get("output")
+
+            def progress(stage: str, percent: float, message: str) -> None:
+                self.queue.update_progress(
+                    task.id,
+                    float(percent or 0),
+                    stage=stage,
+                )
+                self.record_task_event(task.id, stage, float(percent or 0), message)
+
+            summary = WebDataPipeline(config, output=output).run(progress=progress)
+            return json.dumps(summary, ensure_ascii=False)
         if task.kind == "crawl":
             from media_parser import extract_media_urls
 
             url = payload["url"]
-            session = self._build_session(payload)
+            session = self._build_session(
+                payload,
+                account=account,
+                proxy_pool_store=self.proxy_pools,
+            )
             body, _ = session.get_bytes(url)
+            html = body.decode("utf-8", "replace")
+            base_url = payload.get("base_url") or url
             extraction = extract_media_urls(
-                body.decode("utf-8", "replace"),
-                base_url=payload.get("base_url") or url,
+                html,
+                base_url=base_url,
             )
             summary = {
                 "url": url,
@@ -129,6 +240,10 @@ class MediaPipelineService:
                 "hls": len(extraction.hls),
                 "links": len(extraction.links),
             }
+            if payload.get("deep", False):
+                from page_data_parser import analyze_page
+
+                summary["page_data"] = analyze_page(html, base_url=base_url).summary()
             if payload.get("download", True):
                 dest_dir = Path(payload.get("dest_dir", "downloads"))
                 dest_dir.mkdir(parents=True, exist_ok=True)
@@ -165,7 +280,11 @@ class MediaPipelineService:
                             )
             return json.dumps(summary, ensure_ascii=False)
         if task.kind == "download":
-            session = self._build_session(payload)
+            session = self._build_session(
+                payload,
+                account=account,
+                proxy_pool_store=self.proxy_pools,
+            )
             download_kwargs: dict[str, Any] = {
                 "resume": bool(payload.get("resume", True)),
             }
@@ -190,7 +309,11 @@ class MediaPipelineService:
         if task.kind == "hls":
             from hls_downloader import download_hls
 
-            session = self._build_session(payload)
+            session = self._build_session(
+                payload,
+                account=account,
+                proxy_pool_store=self.proxy_pools,
+            )
             hls_result = download_hls(
                 payload["playlist_url"],
                 payload["output_dir"],
@@ -234,13 +357,110 @@ class MediaPipelineService:
         return name
 
     @staticmethod
-    def _build_session(payload: dict[str, Any]):
+    def _build_session(
+        payload: dict[str, Any],
+        account: dict[str, Any] | None = None,
+        proxy_pool_store: ProxyPoolStore | None = None,
+    ):
         from media_session import MediaSession
+        from scrape_guard import AdaptiveThrottle, RobotsPolicy
 
-        return MediaSession(
-            headers=payload.get("headers"),
-            proxy=payload.get("proxy"),
+        headers = payload.get("headers")
+        proxy = payload.get("proxy")
+        cookies = payload.get("cookies")
+        if account:
+            headers = {**(account.get("headers") or {}), **(headers or {})}
+            proxy = account.get("proxy") or proxy
+            if account.get("cookies"):
+                cookies = (cookies or []) + list(account["cookies"])
+            elif account.get("cookies_path"):
+                cookies_path = Path(account["cookies_path"])
+                if cookies_path.exists():
+                    loaded = json.loads(cookies_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, list):
+                        cookies = (cookies or []) + loaded
+        robots = None
+        robots_text = payload.get("robots_text")
+        if robots_text:
+            robots = RobotsPolicy(user_agent=payload.get("user_agent") or "MediaPipeline/1.0")
+            robots.load_text(str(robots_text))
+        throttle = None
+        if payload.get("adaptive_throttle", False):
+            throttle = AdaptiveThrottle(
+                base_delay=float(payload.get("throttle_base_delay", 1.0)),
+                max_delay=float(payload.get("throttle_max_delay", 60.0)),
+            )
+        session = MediaSession(
+            headers=headers,
+            proxy=proxy,
+            proxy_pool=MediaPipelineService._resolve_proxy_pool(
+                payload.get("proxy_pool"),
+                proxy_pool_store,
+            ),
+            min_interval=float(payload.get("min_interval", 0.0)),
+            jitter=float(payload.get("jitter", 0.2)),
+            max_retries=int(payload.get("max_retries", 0)),
+            backoff_base=float(payload.get("backoff_base", 0.5)),
+            backoff_max=float(payload.get("backoff_max", 30.0)),
+            robots=robots,
+            adaptive_throttle=throttle,
         )
+        if cookies:
+            session.load_cookies(cookies if isinstance(cookies, list) else [cookies])
+        return session
+
+    @staticmethod
+    def _resolve_proxy_pool(value: Any, store: ProxyPoolStore | None = None):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            if store is None:
+                raise ValueError("proxy pool store is not configured")
+            pool = store.get(value)
+            if pool is None:
+                raise ValueError(f"proxy pool not found: {value}")
+            return pool
+        return ProxyPool.from_config(value)
+
+    @staticmethod
+    def _apply_account(
+        config: dict[str, Any],
+        account: dict[str, Any],
+    ) -> dict[str, Any]:
+        config = dict(config)
+        browser = dict(config.get("browser") or {})
+        api = dict(config.get("api") or {})
+        if account.get("storage_state"):
+            browser["storage_state"] = account["storage_state"]
+        if account.get("cookies_path"):
+            browser.setdefault("cookies_path", account["cookies_path"])
+            api.setdefault("cookies_path", account["cookies_path"])
+        if account.get("user_data_dir"):
+            browser["user_data_dir"] = account["user_data_dir"]
+        if account.get("proxy"):
+            browser["proxy"] = account["proxy"]
+            api["proxy"] = account["proxy"]
+        if account.get("headers"):
+            merged_headers = dict(api.get("headers") or {})
+            merged_headers.update(account["headers"])
+            api["headers"] = merged_headers
+        if account.get("login"):
+            merged_login = dict(browser.get("login") or {})
+            merged_login.update(account["login"])
+            browser["login"] = merged_login
+        config["browser"] = browser
+        config["api"] = api
+        return config
+
+    def _notify_task(self, task_id: int) -> None:
+        if not self.notifier.enabled_channels():
+            return
+        task = self.queue.get(task_id)
+        if task is None or task.payload.get("notify") is False:
+            return
+        if task.status not in {"succeeded", "failed", "cancelled"}:
+            return
+        self.notifier.notify_task(_task_to_dict(task))
 
     def install_deps_async(self) -> bool:
         with self._install_lock:
@@ -281,9 +501,36 @@ class MediaPipelineService:
         with self._progress_lock:
             return dict(self._install_progress)
 
+    def record_task_event(
+        self,
+        task_id: int,
+        stage: str,
+        percent: float,
+        message: str,
+    ) -> None:
+        with self._events_lock:
+            events = self._task_events.setdefault(task_id, [])
+            events.append(
+                {
+                    "stage": stage,
+                    "percent": percent,
+                    "message": message,
+                    "at": time.time(),
+                }
+            )
+            if len(events) > 200:
+                self._task_events[task_id] = events[-200:]
+
+    def task_events(self, task_id: int, after: int = 0) -> list[dict[str, Any]]:
+        with self._events_lock:
+            events = self._task_events.get(task_id, [])
+            return list(events[max(0, after) :])
+
     def close(self) -> None:
         self.stop_workers()
         self.queue.close()
+        self.accounts.close()
+        self.proxy_pools.close()
 
 
 class MediaHTTPServer(ThreadingHTTPServer):
@@ -339,6 +586,37 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
             if path == "/deps/progress":
                 self._send_json(200, service.install_progress)
                 return
+            if path == "/accounts":
+                self._send_json(200, {"items": service.accounts.list()})
+                return
+            if path == "/schedules":
+                self._send_json(
+                    200,
+                    {"items": [asdict(item) for item in service.scheduler.list()]},
+                )
+                return
+            if path == "/proxy-pools":
+                self._send_json(200, {"items": service.proxy_pools.list()})
+                return
+            if path.startswith("/proxy-pools/"):
+                name = unquote(path[len("/proxy-pools/") :].rstrip("/"))
+                if not name or "/" in name:
+                    self._send_json(404, {"error": "not found"})
+                    return
+                try:
+                    self._send_json(200, service.proxy_pools.get_status(name))
+                except KeyError:
+                    self._send_json(404, {"error": "proxy pool not found"})
+                return
+            if path == "/notifications/status":
+                self._send_json(
+                    200,
+                    {
+                        "channels": service.notifier.enabled_channels(),
+                        "config": service.notifier.config,
+                    },
+                )
+                return
             if path == "/tasks":
                 status = query.get("status", [None])[0]
                 search = query.get("search", [None])[0]
@@ -367,6 +645,32 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                     else:
                         self._send_json(200, _task_to_dict(task))
                     return
+                if len(parts) == 4 and parts[2].isdigit():
+                    task_id = int(parts[2])
+                    if parts[3] == "events":
+                        after_text = query.get("after", ["0"])[0] or "0"
+                        try:
+                            after = max(0, int(after_text))
+                        except ValueError:
+                            after = 0
+                        events = service.task_events(task_id, after)
+                        self._send_json(200, {"events": events, "next": after + len(events)})
+                        return
+                    if parts[3] == "progress":
+                        task = service.queue.get(task_id)
+                        if task is None:
+                            self._send_json(404, {"error": "task not found"})
+                        else:
+                            self._send_json(
+                                200,
+                                {
+                                    "task_id": task.id,
+                                    "progress": task.progress,
+                                    "stage": task.stage,
+                                    "events": service.task_events(task_id),
+                                },
+                            )
+                        return
             self._send_json(404, {"error": "not found"})
 
         def do_POST(self) -> None:
@@ -392,6 +696,91 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                 started = service.install_deps_async()
                 self._send_json(200, {"started": started})
                 return
+            if path == "/notifications/test":
+                sent = service.notifier.send(
+                    "Test notification",
+                    "Sidecar notification channels are configured.",
+                )
+                self._send_json(200, {"sent": sent})
+                return
+            if path == "/proxy-pools":
+                name = data.get("name")
+                config = data.get("config", data.get("proxies"))
+                if not isinstance(name, str) or not name:
+                    self._send_json(400, {"error": "proxy pool name is required"})
+                    return
+                try:
+                    self._send_json(200, service.proxy_pools.upsert(name, config))
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                return
+            if path == "/accounts":
+                try:
+                    self._send_json(200, service.accounts.upsert(data))
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                return
+            if path.startswith("/accounts/"):
+                parts = path.split("/")
+                if len(parts) == 4 and parts[3] in ("acquire", "release"):
+                    name = unquote(parts[2])
+                    if parts[3] == "acquire":
+                        profile = service.accounts.acquire(name)
+                        if profile is None:
+                            self._send_json(409, {"error": "account unavailable"})
+                        else:
+                            self._send_json(200, profile)
+                        return
+                    service.accounts.release(
+                        name,
+                        success=bool(data.get("success", True)),
+                        error=data.get("error"),
+                    )
+                    self._send_json(200, {"ok": True})
+                    return
+            if path == "/schedules":
+                kind = data.get("kind")
+                payload = data.get("payload")
+                schedule = data.get("schedule")
+                if (
+                    not isinstance(kind, str)
+                    or not isinstance(payload, dict)
+                    or not isinstance(schedule, dict)
+                ):
+                    self._send_json(
+                        400,
+                        {"error": "kind, payload, and schedule are required"},
+                    )
+                    return
+                try:
+                    item = service.scheduler.add(
+                        kind,
+                        payload,
+                        schedule,
+                        dedupe_key=data.get("dedupe_key"),
+                        priority=int(data.get("priority", 0)),
+                        max_attempts=(
+                            int(data["max_attempts"])
+                            if data.get("max_attempts") is not None
+                            else None
+                        ),
+                        start_after_seconds=float(data.get("start_after_seconds", 0.0)),
+                    )
+                except (TypeError, ValueError) as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(200, asdict(item))
+                return
+            if path.startswith("/schedules/"):
+                parts = path.split("/")
+                if len(parts) == 4 and parts[2].isdigit() and parts[3] in ("pause", "resume"):
+                    schedule_id = int(parts[2])
+                    if parts[3] == "pause":
+                        service.scheduler.pause(schedule_id)
+                    else:
+                        service.scheduler.resume(schedule_id)
+                    self._send_json(200, {"ok": True})
+                    return
             if path == "/tasks":
                 kind = data.get("kind")
                 payload = data.get("payload")
@@ -424,6 +813,16 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                 if resume_token is not None and not isinstance(resume_token, dict):
                     self._send_json(400, {"error": "resume_token must be an object"})
                     return
+                run_after = None
+                if data.get("run_after_seconds") is not None:
+                    try:
+                        run_after = (
+                            datetime.now(timezone.utc)
+                            + timedelta(seconds=float(data["run_after_seconds"]))
+                        ).isoformat()
+                    except (TypeError, ValueError):
+                        self._send_json(400, {"error": "run_after_seconds must be a number"})
+                        return
                 task = service.queue.enqueue(
                     kind=kind,
                     payload=payload,
@@ -431,6 +830,7 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                     priority=priority,
                     max_attempts=max_attempts,
                     resume_token=resume_token,
+                    run_after=run_after,
                 )
                 self._send_json(200, _task_to_dict(task))
                 return
@@ -460,6 +860,30 @@ def _make_handler(service: MediaPipelineService) -> type[BaseHTTPRequestHandler]
                     return
             self._send_json(404, {"error": "not found"})
 
+        def do_DELETE(self) -> None:
+            if not self._authorized():
+                return
+            path = urlparse(self.path).path
+            if path.startswith("/schedules/"):
+                parts = path.split("/")
+                if len(parts) == 3 and parts[2].isdigit():
+                    removed = service.scheduler.remove(int(parts[2]))
+                    self._send_json(200, {"ok": removed})
+                    return
+            if path.startswith("/accounts/"):
+                name = unquote(path[len("/accounts/") :].rstrip("/"))
+                if name and "/" not in name:
+                    removed = service.accounts.remove(name)
+                    self._send_json(200, {"ok": removed})
+                    return
+            if path.startswith("/proxy-pools/"):
+                name = unquote(path[len("/proxy-pools/") :].rstrip("/"))
+                if name and "/" not in name:
+                    removed = service.proxy_pools.remove(name)
+                    self._send_json(200, {"ok": removed})
+                    return
+            self._send_json(404, {"error": "not found"})
+
     return Handler
 
 
@@ -470,8 +894,19 @@ def run_service(
     workers: int = 2,
     runtime_dir: str | Path | None = None,
     token: str | None = None,
+    accounts_path: str | Path | None = None,
+    proxy_pools_path: str | Path | None = None,
+    notifications: dict[str, Any] | None = None,
 ) -> MediaHTTPServer:
-    service = MediaPipelineService(db_path, runtime_dir=runtime_dir, workers=workers, token=token)
+    service = MediaPipelineService(
+        db_path,
+        runtime_dir=runtime_dir,
+        workers=workers,
+        token=token,
+        accounts_path=accounts_path,
+        proxy_pools_path=proxy_pools_path,
+        notifications=notifications,
+    )
     try:
         server = MediaHTTPServer((host, port), _make_handler(service))
     except Exception:
@@ -490,6 +925,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--runtime-dir", default=None)
     parser.add_argument("--token", default=None, help="Bearer token for local API")
+    parser.add_argument("--accounts", default=None, help="JSON file for account profiles")
+    parser.add_argument("--proxy-pools", default=None, help="JSON file for named proxy pools")
+    parser.add_argument(
+        "--notify-config",
+        default=None,
+        help="JSON file with desktop/email/webhook notification config",
+    )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -502,6 +944,9 @@ def main(argv: list[str] | None = None) -> int:
         print("media pipeline service self-test OK")
         return 0
     db = Path(args.db) if args.db else Path(tempfile.gettempdir()) / "media_tasks.sqlite"
+    notifications = None
+    if args.notify_config:
+        notifications = json.loads(Path(args.notify_config).read_text(encoding="utf-8"))
     server = run_service(
         db,
         host=args.host,
@@ -509,6 +954,9 @@ def main(argv: list[str] | None = None) -> int:
         workers=args.workers,
         runtime_dir=args.runtime_dir,
         token=args.token,
+        accounts_path=args.accounts,
+        proxy_pools_path=args.proxy_pools,
+        notifications=notifications,
     )
     print(f"media pipeline service on http://{args.host}:{server.server_port}", flush=True)
     try:

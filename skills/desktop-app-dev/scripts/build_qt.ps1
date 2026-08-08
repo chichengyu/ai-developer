@@ -16,7 +16,9 @@ param(
     [string] $Arch = "x64",
     [string] $Config = "Release",
     [string] $PackageType = "NSIS",         # NSIS | WIX (MSI) | IFW_ServerInstaller | THIRDPARTY
-    [string] $OutputDir = "dist"
+    [bool] $MinimalDeploy = $true,          # skip translations/compiler-runtime/software GL to shrink the bundle
+    [string] $OutputDir = "dist",
+    [switch] $BackupSource                  # timestamped source zip before packaging
 )
 
 # Map Arch to the Qt toolchain prefix we expect to find.
@@ -27,6 +29,15 @@ $qtArchDir = @{
 }[$Arch]
 
 $ErrorActionPreference = "Stop"
+
+if ($BackupSource) {
+    Write-Host "==> Backing up source before packaging" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "backup_source.ps1") `
+        -SourcePath (Get-Location).Path `
+        -OutputDir (Join-Path $OutputDir "source_backup") `
+        -Name $AppName
+    if ($LASTEXITCODE -ne 0) { throw "Source backup failed" }
+}
 
 function Resolve-QtBin {
     param([string]$Dir)
@@ -68,6 +79,12 @@ if (-not $exePath) { throw "Could not find $AppName.exe under $BuildDir" }
 # 4. windeployqt
 Write-Host "==> windeployqt" -ForegroundColor Cyan
 $windeployArgs = @("--release")
+if ($MinimalDeploy) {
+    $windeployArgs += "--no-translations"
+    $windeployArgs += "--no-system-d3d-compiler"
+    $windeployArgs += "--no-opengl-sw"
+    $windeployArgs += "--no-compiler-runtime"
+}
 if (Test-Path (Join-Path $SourceDir "qml")) {
     $windeployArgs += "--qmldir"
     $windeployArgs += (Join-Path $SourceDir "qml")
@@ -90,9 +107,19 @@ if ($PackageType -in @("NSIS","WIX")) {
 # 6. Collect into dist
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir | Out-Null }
 $staging = Join-Path $OutputDir $AppName
-if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+if (Test-Path $staging) {
+    $sourceRoot = (Resolve-Path -LiteralPath $SourceDir).Path
+    $stagingPath = (Resolve-Path -LiteralPath $staging).Path
+    if ($stagingPath -eq $sourceRoot -or
+        $sourceRoot.StartsWith($stagingPath + [System.IO.Path]::DirectorySeparatorChar)) {
+        throw "Refusing to remove ${staging}: it overlaps the project source at ${sourceRoot}. Set -OutputDir to a generated-output directory."
+    }
+    Remove-Item -LiteralPath $staging -Recurse -Force
+}
 Copy-Item (Split-Path $exePath -Parent) $staging -Recurse -Force
 
 Write-Host "==> Staged: $staging" -ForegroundColor Green
+$stagedSize = (Get-ChildItem $staging -Recurse -File | Measure-Object -Property Length -Sum).Sum
+Write-Host ("==> Portable folder size: {0:N1} MB ({1:N0} KB). Use the NSIS installer as the single-file deliverable." -f ($stagedSize / 1MB), ($stagedSize / 1KB)) -ForegroundColor Green
 Write-Host "Next: sign with signtool, then test on a clean Windows VM." -ForegroundColor Yellow
 

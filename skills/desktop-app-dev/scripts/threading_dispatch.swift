@@ -9,12 +9,12 @@
 
 import Foundation
 
-/// Marker error raised inside a job when it observes `Task.isCancelled`.
+/// Marker error raised inside a job when it observes cancellation.
 struct JobCancelled: Error {}
 
 @MainActor
-public final class JobRunner<JobOutput>: @unchecked Sendable {
-    public typealias Job = @Sendable (Task<JobOutput, Error>) async throws -> Void
+public final class JobRunner<JobOutput: Sendable>: @unchecked Sendable {
+    public typealias Job = @Sendable (_ onProgress: @escaping @Sendable (Double) -> Void) async throws -> JobOutput
 
     private let job: Job
     private var task: Task<Void, Never>?
@@ -28,22 +28,20 @@ public final class JobRunner<JobOutput>: @unchecked Sendable {
     /// `onCancel`. All callbacks are dispatched back to MainActor.
     public func start(
         onProgress: @escaping @MainActor (Double) -> Void = { _ in },
-        onDone:     @escaping @MainActor (JobOutput) -> Void = { _ in },
-        onError:    @escaping @MainActor (Error) -> Void = { _ in },
-        onCancel:   @escaping @MainActor () -> Void = {}
+        onDone: @escaping @MainActor (JobOutput) -> Void = { _ in },
+        onError: @escaping @MainActor (Error) -> Void = { _ in },
+        onCancel: @escaping @MainActor () -> Void = {}
     ) {
-        cancel()  // ensure no leftover task
+        cancel() // ensure no leftover task
 
         let job = self.job
         task = Task.detached(priority: .userInitiated) {
             do {
-                let output: JobOutput = try await {
-                    try await job(Task { output in output })
-                    // job threw; the throwing closure above already raised
-                    fatalError("unreachable")
-                }()
+                let output = try await job { progress in
+                    await onProgress(progress)
+                }
                 await onDone(output)
-            } catch is JobCancelled {
+            } catch is CancellationError {
                 await onCancel()
             } catch {
                 await onError(error)
@@ -57,14 +55,14 @@ public final class JobRunner<JobOutput>: @unchecked Sendable {
     }
 
     public var isRunning: Bool {
-        task?.isCancelled == false && task != nil
+        guard let task else { return false }
+        return !task.isCancelled
     }
 }
 
 /// Cooperative cancel check; call periodically from CPU loops.
-@Sendable
-public func pollCancel(_ task: Task<some Sendable, Error>) throws {
-    if Task.isCancelled { throw JobCancelled() }
+public func pollCancel() throws {
+    if Task.isCancelled { throw CancellationError() }
 }
 
 #if canImport(AppKit)

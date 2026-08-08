@@ -6,6 +6,53 @@ this document is what to do after.
 
 ---
 
+## Single-file, zero-runtime, small footprint
+
+When the recipient must get one file, install nothing, and keep RAM low,
+rank the framework before you build:
+
+| Framework / artifact           | Single artifact   | Runtime on target                          | Typical size        | Idle memory   |
+|--------------------------------|-------------------|--------------------------------------------|---------------------|---------------|
+| NativeAOT (WinForms)           | EXE               | none                                       | ~5-15 MB            | ~20-60 MB     |
+| Go Fyne / Gio / walk           | EXE               | none                                       | ~8-30 MB            | ~15-60 MB     |
+| PyInstaller + tkinter          | EXE               | none                                       | ~10-40 MB           | ~25-80 MB     |
+| C++/Qt static                  | EXE               | none                                       | ~10-40 MB           | ~30-80 MB     |
+| Tauri NSIS                     | one setup EXE     | WebView2 (Win 10/11 usually preinstalled)  | ~3-10 MB installer  | ~60-120 MB    |
+| .NET self-contained            | EXE               | none                                       | ~30-80 MB           | ~50-150 MB    |
+| Electron portable              | EXE               | none                                       | ~80-150 MB          | ~150-400 MB   |
+| Compose Multiplatform          | MSI/EXE + JBR     | none                                       | ~50-150 MB          | ~150-300 MB   |
+
+The `scripts/build_*.ps1` helpers now default to the size-lean path:
+single-file or single-installer output, no runtime install, compression on,
+debug symbols off, and a printed size report. Record idle RAM on a clean VM
+in Step 6; size without memory is only half the acceptance.
+
+Default size / memory guidance:
+
+| Goal                          | Use                                                   |
+|-------------------------------|-------------------------------------------------------|
+| Smallest EXE, no runtime      | NativeAOT, raw Win32/MFC, Go Fyne/Gio/walk            |
+| Small EXE + fast iteration    | PyInstaller (tkinter), .NET self-contained            |
+| One installer, small size     | Tauri NSIS (WebView2 present), Qt NSIS, Go Wails NSIS |
+| Avoid for small RAM           | Electron, Compose Multiplatform with default JBR      |
+
+### Runtime memory reduction
+
+- Python: import heavy libraries lazily inside functions, keep
+  `pandas` / `numpy` / GUI backends out of module scope when possible, and
+  use the size-lean PyInstaller excludes.
+- .NET: prefer NativeAOT when the UI stack allows it; otherwise keep
+  compression on and avoid `ReadyToRun` unless cold start demands it.
+- Go: `-s -w -H windowsgui -trimpath -buildvcs=false` (already the script
+  default); do not ship a console subsystem with a GUI app.
+- Web-based UIs: Tauri shares the OS WebView2 instead of embedding
+  Chromium; Electron should only be chosen when its ecosystem wins matter
+  more than RAM.
+- Measure on a clean VM: idle RAM, peak RAM during a typical workflow, and
+  RAM after the window is minimized. Record all three in the Step 6 report.
+
+---
+
 ## Distribution-first override
 
 If the user specifies a hard distribution constraint, narrow the framework
@@ -44,16 +91,30 @@ matrix first:
 
 `*` = supported by the toolchain but not yet verified at run time in this skill.
 
-## Python: PyInstaller
+### Source backup
+
+Every `scripts/build_*.ps1` helper accepts `-BackupSource` and creates a
+timestamped source zip via `scripts/backup_source.ps1` before packaging.
+Use it even when the project is already under version control.
+
 ## Python: PyInstaller
 
 ### Single-file EXE
 ```powershell
 pyinstaller --onefile --windowed --name MyApp --icon assets/icon.ico ^
+  --noupx ^
+  --exclude-module unittest --exclude-module pydoc ^
+  --exclude-module pydoc_data --exclude-module tkinter.test ^
   --add-data "assets;assets" ^
   --hidden-import custom_module ^
   app.py
 ```
+
+`scripts/build_python.ps1` already passes `--onefile --windowed --noupx` and
+a safe `-ExcludeModules` list (`unittest`, `pydoc`, `pydoc_data`,
+`tkinter.test`, `setuptools`, `distutils`). Pass `-ExcludeModules @()` when
+the app really imports one of them. UPX is opt-in (`-Upx`) because packed
+binaries can trigger AV false positives.
 
 ### Common pitfalls
 - **Missing module**: PyInstaller static analysis misses dynamic imports
@@ -88,16 +149,28 @@ pyinstaller --onefile --windowed --name MyApp --icon assets/icon.ico ^
 ```powershell
 dotnet publish -c Release -r win-x64 --self-contained true ^
   -p:PublishSingleFile=true ^
-  -p:PublishReadyToRun=true ^
-  -p:IncludeNativeLibrariesForSelfExtract=true
+  -p:IncludeNativeLibrariesForSelfExtract=true ^
+  -p:EnableCompressionInSingleFile=true ^
+  -p:DebugType=None ^
+  -p:DebugSymbols=false
 ```
 
 ### NativeAOT (smallest)
 ```powershell
 dotnet publish -c Release -r win-x64 --self-contained true ^
-  -p:PublishAot=true
+  -p:PublishAot=true ^
+  -p:PublishSingleFile=true ^
+  -p:OptimizationPreference=Size ^
+  -p:IlcOptimizationPreference=Size ^
+  -p:InvariantGlobalization=true ^
+  -p:DebugType=None
 ```
 Requirements: .NET 8+, no dynamic code-gen in dependencies.
+
+`scripts/build_dotnet.ps1` makes ReadyToRun opt-in (`-ReadyToRun`) because
+R2R trades several MB for a faster cold start. `-Trim` enables
+`PublishTrimmed` for reflection-safe projects; use NativeAOT when the UI
+stack allows it for the smallest result.
 
 ### Bundle third-party DLLs
 Use **Costura.Fody** to embed native DLLs into the managed EXE:
@@ -115,8 +188,30 @@ both managed and unmanaged code.
 cargo tauri build
 ```
 Produces:
-- `src-tauri/target/release/bundle/nsis/MyApp_0.1.0_x64-setup.exe`
-- `src-tauri/target/release/bundle/msi/MyApp_0.1.0_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MyApp_0.1.0_x64-setup.exe` (default)
+- `src-tauri/target/release/bundle/msi/MyApp_0.1.0_x64_en-US.msi` (with `-Targets msi`)
+
+`scripts/build_tauri.ps1` defaults to the NSIS target (one setup EXE) and
+sets the size-lean Rust release profile through Cargo env vars:
+
+```powershell
+$env:CARGO_PROFILE_RELEASE_OPT_LEVEL = "z"
+$env:CARGO_PROFILE_RELEASE_LTO = "true"
+$env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1"
+$env:CARGO_PROFILE_RELEASE_PANIC = "abort"
+$env:CARGO_PROFILE_RELEASE_STRIP = "true"
+```
+
+The equivalent `[profile.release]` block can also go in `src-tauri/Cargo.toml`:
+
+```toml
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+```
 
 For auto-update, configure `tauri.conf.json`:
 ```json
@@ -138,9 +233,13 @@ prompt the user to install.
 
 ```powershell
 npm run build
-electron-builder --win nsis --x64
+electron-builder --win portable --x64 -c.compression=maximum -c.asar=true
 ```
-Output: `dist/MyApp Setup 0.1.0.exe`.
+Output: `dist/MyApp 0.1.0.exe` (portable, single file). NSIS produces
+`dist/MyApp Setup 0.1.0.exe`.
+
+Electron bundles Chromium: expect 80-150 MB and 150-400 MB RAM. If EXE size
+or idle memory is a hard budget, use Tauri or NativeAOT instead.
 
 For auto-update, install `electron-updater` and configure
 `build.publish.provider = "generic"` in `electron-builder.yml` with your
@@ -156,7 +255,8 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Ninja"
 cmake --build build --config Release
 
 # Collect Qt DLLs
-windeployqt --release --qmldir qml build/MyApp.exe
+windeployqt --release --no-translations --no-system-d3d-compiler ^
+  --no-opengl-sw --no-compiler-runtime --qmldir qml build/MyApp.exe
 
 # Build installer
 cpack -G NSIS            # or -G WIX for MSI
@@ -165,6 +265,10 @@ cpack -G NSIS            # or -G WIX for MSI
 For a single-file portable EXE, build with static Qt (`-static` configure flag
 when building Qt itself). Easiest path: use `aqtinstall` to grab a static Qt
 build, or use the KDE Craft installer.
+
+Without static Qt, the NSIS installer produced by `scripts/build_qt.ps1` is
+the single-file deliverable; it carries the Qt DLLs and needs no runtime
+installed on the recipient machine.
 
 ---
 

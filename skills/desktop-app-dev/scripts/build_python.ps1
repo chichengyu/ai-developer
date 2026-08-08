@@ -17,9 +17,11 @@ param(
     [string] $PythonExe = "",        # blank => auto-resolve
     [ValidateSet("auto", "x64", "arm64", "x86")]
     [string] $Arch = "auto",         # PyInstaller is host-bound; "auto" uses host arch
+    [string[]] $ExcludeModules = @("unittest", "pydoc", "pydoc_data", "tkinter.test", "setuptools", "distutils"),
     [string] $OutDir = "dist",
     [switch] $BackupSource,          # timestamped source zip before packaging
-    [switch] $Install                # install missing PyInstaller; default is check-only
+    [switch] $Install,               # install missing PyInstaller; default is check-only
+    [switch] $Upx                    # opt-in UPX compression; may increase AV false positives
 )
 
 $ErrorActionPreference = "Stop"
@@ -86,10 +88,22 @@ if ($LASTEXITCODE -ne 0) {
 
 $pyiArgs = @("--onefile", "--windowed", "--name", $Name,
              "--distpath", $OutDir, "--workpath", "build", "--specpath", "build")
+if (-not $Upx) {
+    # UPX-packed EXEs are more likely to trip SmartScreen/AV; keep the
+    # default artifact clean and deterministic unless the caller opts in.
+    $pyiArgs += "--noupx"
+}
+foreach ($m in $ExcludeModules) {
+    if ($m) { $pyiArgs += @("--exclude-module", $m) }
+}
 
 if ($Icon -and (Test-Path $Icon)) { $pyiArgs += @("--icon", $Icon) }
 foreach ($h in $HiddenImports) { $pyiArgs += @("--hidden-import", $h) }
 foreach ($d in $AddData) { $pyiArgs += @("--add-data", $d) }
+
+if ($Upx) {
+    Write-Host "==> NOTE: UPX enabled. Test the EXE on a clean VM; UPX can trigger AV false positives." -ForegroundColor Yellow
+}
 
 Write-Host "==> Running PyInstaller" -ForegroundColor Cyan
 & $py -m PyInstaller @pyiArgs $Entry
@@ -97,7 +111,8 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
 $exe = Join-Path $OutDir "$Name.exe"
 if (-not (Test-Path $exe)) { throw "Expected $exe not produced" }
-Write-Host "==> Built: $exe" -ForegroundColor Green
-Write-Host "Next: sign with signtool, then test on a clean Windows VM." -ForegroundColor Yellow
+$size = (Get-Item $exe).Length
+Write-Host ("==> Built: {0}  ({1:N1} MB / {2:N0} KB)" -f $exe, ($size / 1MB), ($size / 1KB)) -ForegroundColor Green
+Write-Host "Next: sign with signtool, then test on a clean Windows VM (no Python installed)." -ForegroundColor Yellow
 
 

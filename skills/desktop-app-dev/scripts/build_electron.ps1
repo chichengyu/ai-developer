@@ -11,10 +11,23 @@ param(
     [string] $Config = "",                 # path to electron-builder.yml (default: ./electron-builder.yml)
     [switch] $Publish = $false,            # upload to the configured publish provider
     [string] $OutputDir = "dist",
-    [switch] $Install                      # install missing npm deps / electron-builder; default is check-only
+    [switch] $Install,                     # install missing npm deps / electron-builder; default is check-only
+    [switch] $BackupSource                 # timestamped source zip before packaging
 )
 
 $ErrorActionPreference = "Stop"
+
+Write-Host "==> NOTE: Electron bundles Chromium; expect 80-150 MB and roughly 150-400 MB RAM." -ForegroundColor Yellow
+Write-Host "    If EXE size and idle memory are hard budgets, prefer Tauri or .NET NativeAOT." -ForegroundColor Yellow
+
+if ($BackupSource) {
+    Write-Host "==> Backing up source before packaging" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "backup_source.ps1") `
+        -SourcePath (Get-Location).Path `
+        -OutputDir (Join-Path $OutputDir "source_backup") `
+        -Name (Split-Path -Leaf (Get-Location).Path)
+    if ($LASTEXITCODE -ne 0) { throw "Source backup failed" }
+}
 
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     throw "npm not on PATH. Install Node.js LTS from https://nodejs.org/"
@@ -44,7 +57,7 @@ if ($pkg.scripts.build) {
 }
 
 # 3. Run electron-builder
-$ebArgs = @()
+$ebArgs = @("-c.compression=maximum", "-c.asar=true", "-c.npmRebuild=false")
 if ($Config) { $ebArgs += "--config"; $ebArgs += $Config }
 if ($Target -eq "all") {
     $ebArgs += "--win"; $ebArgs += "nsis"; $ebArgs += "msi"; $ebArgs += "portable"
@@ -69,7 +82,10 @@ if ($LASTEXITCODE -ne 0) { throw "electron-builder failed" }
 
 # 4. Collect
 if (Test-Path "dist") {
-    Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
+    Get-ChildItem dist -File -Recurse | ForEach-Object {
+        $size = $_.Length
+        Write-Host ("==> Artifact: {0}  ({1:N1} MB / {2:N0} KB)" -f $_.FullName, ($size / 1MB), ($size / 1KB)) -ForegroundColor Green
+    }
 }
 Write-Host "==> Done. Output under ./dist" -ForegroundColor Green
 Write-Host "Next: sign the EXE with signtool, then test on a clean Windows VM." -ForegroundColor Yellow

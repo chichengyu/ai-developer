@@ -353,3 +353,9 @@ def download_file(
         chunks_downloaded=len(chunk_map["chunks"]),
         resumed=True,
     )
+
+
+if __name__ == "__main__":
+    print(
+        "desktop-app-dev media_downloader: import download_file() / safe_output_name() for downloads."
+    )

@@ -8,12 +8,23 @@
 [CmdletBinding()]
 param(
     [string] $Config = "release",
+    [bool] $Osize = $true,           # optimize for size (-Osize)
     [switch] $Static,
     [ValidateSet("x64", "arm64")]
-    [string] $Arch = "x64"
+    [string] $Arch = "x64",
+    [switch] $BackupSource             # timestamped source zip before packaging
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($BackupSource) {
+    Write-Host "==> Backing up source before packaging" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "backup_source.ps1") `
+        -SourcePath (Get-Location).Path `
+        -OutputDir "source_backup" `
+        -Name (Split-Path -Leaf (Get-Location).Path)
+    if ($LASTEXITCODE -ne 0) { throw "Source backup failed" }
+}
 
 if (-not (Get-Command swift -ErrorAction SilentlyContinue)) {
     throw "swift not on PATH. Install the Swift toolchain for Windows from https://www.swift.org/install/windows/"
@@ -24,6 +35,7 @@ $triple = @{ "x64" = "x86_64-unknown-windows-msvc"; "arm64" = "aarch64-unknown-w
 Write-Host "==> swift build --triple $triple" -ForegroundColor Cyan
 
 $buildArgs = @("build", "-c", $Config, "--triple", $triple)
+if ($Osize) { $buildArgs += "-Xswiftc", "-Osize" }
 if ($Static) { $buildArgs += "-Xswiftc", "-static-stdlib" }
 
 Write-Host "==> swift build $($buildArgs -join ' ')" -ForegroundColor Cyan
@@ -34,7 +46,8 @@ if ($LASTEXITCODE -ne 0) { throw "swift build failed" }
 $binDir = ".build" + [System.IO.Path]::DirectorySeparatorChar + $Config
 $exe = Get-ChildItem -Path $binDir -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
 if ($exe) {
-    Write-Host "==> Built: $exe" -ForegroundColor Green
+    $size = (Get-Item $exe).Length
+    Write-Host ("==> Built: {0} ({1:N1} MB / {2:N0} KB)" -f $exe, ($size / 1MB), ($size / 1KB)) -ForegroundColor Green
     Write-Host "Next: sign with signtool, then test on a clean Windows VM." -ForegroundColor Yellow
 } else {
     Write-Host "Build complete but no .exe found in $binDir. Verify Package.swift has a Windows executable target." -ForegroundColor Yellow

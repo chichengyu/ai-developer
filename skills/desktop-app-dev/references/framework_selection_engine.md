@@ -50,6 +50,9 @@ such as `target_os` must use inline JSON-style arrays
 where each weight is in [0, 1]:
 
 - `target_os` -> weight 1.0 on every OS dimension + per-arch dimension.
+  The seven per-arch dimensions are `win_x64_arch`, `win_arm64_arch`,
+  `win_x86_arch`, `macos_x64_arch`, `macos_arm64_arch`, `linux_x64_arch`,
+  and `linux_arm64_arch`.
 - `hardware_access` -> weight 1.0 on `sendinput_friendly` (or
   `usb_serial_access`) and 0.7 on `win32_interop`.
 - `web_ui_required: true` -> weight 1.0 on `web_ui_support`.

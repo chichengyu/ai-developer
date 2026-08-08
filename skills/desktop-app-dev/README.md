@@ -42,7 +42,7 @@ Verify with:
 powershell -ExecutionPolicy Bypass -File tests/test_arch_awareness.ps1
 ```
 
-The current 14 / 14 build scripts pass:
+The current 14 build scripts pass; `test_arch_awareness.ps1` reports 16 / 16 checks (14 build scripts + 2 auto-update parse checks):
 
 ```
 [OK] build_dotnet.ps1 -- $Rid accepts win-x64, win-arm64, win-x86
@@ -77,25 +77,29 @@ README.md                         this file
 CHANGELOG.md                      what changed and when
 LICENSE                           MIT
 pyproject.toml                    ruff + mypy config
+requirements-dev.txt              pinned ruff / mypy / types-requests
 .gitignore                        skill-internal ignores
 
 references/
   task_decomposition.md           Step 0+3 deep dive, worked examples
   ui_hard_requirements.md         UI-01..UI-18 mandatory UI rules + theme URLs
+  minimal_change_requirements.md  CODE-01..CODE-05 minimal-change rules
   framework_selection_engine.md   scoring methodology for select_framework.py
   framework_matrix.md             detailed pros/cons + quick decision/threading/resource tables
+  threading_playbook.md           worker contract, pool templates, patterns, anti-patterns, 30-template map
   distribution_playbook.md        packaging/signing/auto-update + distribution-first/arch matrix
   nativeaot_optimization.md       .NET NativeAOT deep dive
   win32_recipes.md                R1-R13 common Win32 patterns
   accessibility_cross_platform.md UIA / MSAA / AppleScript / AT-SPI deep dive
   restricted_network_playbook.md  offline builds, vendoring, local mirrors
   media_acquisition_playbook.md   crawl / HLS / download / transcode / publish + queue
+  web_data_pipeline_playbook.md   fingerprint browser / CAPTCHA / API collection / data processing
   media_pipeline_clients.md       sidecar clients for every desktop language
 
 scripts/
   sendinput_* + SendInput.java (12 files: 10 Windows languages + macOS/Linux analogues)  keyboard input; Python also has mouse
   window_enum_* + WindowEnum.java (12 files: 9 Windows languages + Node C++ shim + macOS/Linux analogues)  drop-in window enumeration
-  threading_*       (7 templates) background-work templates
+  threading_*       (30 files: 22 single-worker + 8 pool templates) cancel/progress/UI bridge + bounded concurrency
   select_framework.py             auto-select framework from requirements brief
   build_*.ps1       (14 helpers)  packaging helpers
   build_dmg.sh / build_appimage.sh / build_deb.sh  macOS / Linux packaging helpers
@@ -107,10 +111,20 @@ scripts/
   vk_table.json                   canonical key table for keyboard templates
   check_vk_tables.py              verifies all Windows templates match vk_table.json
   media_*.py + hls_downloader.py  crawl, parse, chunk download, HLS
+  page_data_parser.py             deep page parse + CLI: metadata, embedded JSON, API endpoints
+  api_client.py                   API specs from captures + rate-limited API fetching
+  api_analyzer.py                 API manifest: auth headers, scores, data paths, pagination
+  data_processor.py               declarative filter/sort/dedupe/aggregate + JSON/JSONL/CSV I/O
+  web_data_pipeline.py            one-config end-to-end web data pipeline
+  scrape_guard.py                 rate limit / retry / robots / adaptive throttle
   task_queue.py                   SQLite persistent task queue
-  captcha_solver.py etc.          CAPTCHA, browser session, ffmpeg, publisher
+  captcha_solver.py etc.          CAPTCHA auto-detect/solve, browser session + network capture, ffmpeg, publisher
   media_dependencies.py           check / install manager (default check-only)
   media_pipeline_service.py       local HTTP sidecar for any desktop UI language
+  proxy_pool.py                   rotating proxy pool + named pool store
+  account_manager.py              multi-account leases and session profiles
+  task_scheduler.py               interval / daily / cron recurring schedules
+  notifier.py                     desktop / email / webhook notifications
   setup_media_dependencies.ps1    check / install runtime dependencies
   sign_windows.ps1 / sign_macos.sh code signing helpers
 
@@ -149,7 +163,8 @@ tests/                            smoke tests + BOM regression + fixtures
 4. Drop in `scripts/sendinput_<lang>` + `scripts/window_enum_<lang>`.
 5. Use `scripts/threading_<lang>` for the UI bridge.
 6. Package with `scripts/build_python.ps1` or `scripts/build_dotnet.ps1`;
-   pass `-BackupSource` to keep a timestamped source zip before the build.
+   pass `-BackupSource` (supported by every `scripts/build_*.ps1` helper)
+   to keep a timestamped source zip before the build.
 7. Run `scripts/auto_update_*.ps1` for the channel.
 8. Or just point at `examples/game-automation/` and start customizing.
 
@@ -174,6 +189,50 @@ multi-monitor setups, and apply `references/ui_hard_requirements.md`
 6. Install Playwright / ffmpeg / pycryptodome with
    `scripts/setup_media_dependencies.ps1 -Install`, or call
    `POST /deps/install` on the local sidecar from the UI.
+
+## Quick recipe -- API data collection and processing
+
+1. Start from `references/web_data_pipeline_playbook.md`.
+2. Use `scripts/browser_session.py` (fingerprint, cookies, network capture)
+   and `scripts/captcha_solver.py` (auto CAPTCHA) for logged-in flows.
+3. Analyze pages with `scripts/page_data_parser.py`.
+4. Turn captures into API specs and fetch them with `scripts/api_client.py`.
+5. Classify Cloudflare / WAF / rate-limit / CAPTCHA / login / geo blocks
+   automatically with `scripts/security_detector.py`, and run
+   `scripts/deep_crawler.py` when the job needs recursive link / sitemap
+   discovery. For high-intensity Cloudflare challenges,
+   `scripts/cloudflare_challenge.py` waits for `cf_clearance`, clicks /
+   injects Turnstile, and reuses the cleared session for API calls.
+6. Shape the records with `scripts/data_processor.py` and save JSON / JSONL /
+   CSV.
+7. Or run everything from one JSON config (`security` + `crawl` sections)
+   with `scripts/web_data_pipeline.py`; desktop UIs can enqueue
+   `kind: "webdata"` tasks through `scripts/media_pipeline_service.py`.
+
+## Quick recipe -- tiny single-file portable EXE
+
+When the deliverable must be one file that runs on a clean Windows machine
+with no environment installs, use the size-lean helper for the chosen stack:
+
+```powershell
+# WinForms / tool-style apps: NativeAOT, smallest .NET option
+powershell -ExecutionPolicy Bypass -File scripts/build_dotnet_nativeaot.ps1 `
+  -Project examples/nativeaot-winforms/NativeAotWinFormsDemo.csproj -BackupSource
+
+# Python tkinter / PySide6: PyInstaller onefile
+powershell -ExecutionPolicy Bypass -File scripts/build_python.ps1 `
+  -Entry app.py -Name MyApp -BackupSource
+
+# Go Fyne / Gio: static single EXE
+powershell -ExecutionPolicy Bypass -File scripts/build_go_gio.ps1 -Output MyApp.exe
+
+# Tauri: one NSIS setup EXE (size-lean Rust release profile is automatic)
+powershell -ExecutionPolicy Bypass -File scripts/build_tauri.ps1 -BackupSource
+```
+
+Every helper prints the artifact size. Record idle RAM on a clean VM as part
+of Step 6; see `references/distribution_playbook.md` for the framework
+size / memory table and per-framework flags.
 
 ## CI / continuous testing
 
@@ -204,6 +263,11 @@ See `INDEX.md` for topic-based navigation (by use case / OS / framework
 - Every task card has explicit acceptance criteria and a verification method.
 - Every script has a `__main__` block that does no real hardware I/O.
 - Every shipped framework has a build path and threading guidance.
+- Every threading template follows the same worker contract: start, cancel,
+  progress, done, error, and a framework-native UI bridge. See
+  `references/threading_playbook.md`.
+- Independent batch jobs use the bounded pool templates
+  (`threading_pool_*`) with aggregate progress, retry, and one `cancel()`.
 - Build scripts never delete project source; `-BackupSource` creates a
   timestamped zip before packaging.
 - Build helpers never auto-install missing CLIs; pass `-Install` to
@@ -212,6 +276,9 @@ See `INDEX.md` for topic-based navigation (by use case / OS / framework
   in the caller.
 - Every GUI app passes `界面硬性要求` UI-01..UI-18 unless explicitly
   waived in requirements.md.
+- When touching existing code, apply the `代码开发硬性要求`
+  CODE-01..CODE-05 minimal-change rules unless explicitly waived in
+  requirements.md.
 - Examples consume canonical `scripts/` templates directly or document
   standalone packaging paths; templates stay canonical, never duplicated.
 - SKILL.md stays a slim context-light entry point; deep details live in
@@ -221,8 +288,8 @@ See `INDEX.md` for topic-based navigation (by use case / OS / framework
 
 ```powershell
 powershell -File tests/run_lint.ps1              # check-only; fails if ruff/mypy missing
-powershell -File tests/run_lint.ps1 -InstallDeps # install ruff/mypy, then run everything
-pip install ruff mypy
+powershell -File tests/run_lint.ps1 -InstallDeps # install from requirements-dev.txt, then run
+pip install -r requirements-dev.txt
 ruff check scripts/ tests/ examples/
 ruff format --check scripts/ tests/ examples/
 mypy scripts/   # CI enforces mypy; it fails the build on type errors

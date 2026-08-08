@@ -29,13 +29,27 @@ POST /tasks
 GET /tasks/<id>
 ```
 
-Supported `kind` values: `crawl` (parse a page and enqueue media
-downloads), `download` (chunked file), `hls` (m3u8 stream),
-`transcode` (ffmpeg), and `publish` (platform adapter).
+Supported `kind` values:
 
-Download payload options: `concurrency`, `chunk_size`, `resume`,
-`headers`, `proxy`. HLS payload options: `concurrency`, `quality`
-(zero-based variant index), `headers`, `proxy`.
+- `analyze` -- deep page parse: metadata, embedded JSON state, API
+  endpoints, JSON media URLs, pagination fields, and detected CAPTCHA
+  challenges.
+- `crawl` -- parse a page and enqueue media downloads; pass
+  `"deep": true` in the payload to include the page-data summary.
+- `download` -- chunked file.
+- `hls` -- m3u8 stream.
+- `transcode` -- ffmpeg.
+- `publish` -- platform adapter.
+
+Analyze payload options: `base_url`, `include_data`, `headers`, `proxy`.
+Crawl payload options: `deep`, `download`, `dest_dir`, `base_url`,
+`headers`, `proxy`. Download payload options: `concurrency`,
+`chunk_size`, `resume`, `headers`, `proxy`. HLS payload options:
+`concurrency`, `quality` (zero-based variant index), `headers`, `proxy`.
+All fetch-based kinds also accept `min_interval`, `jitter`, `max_retries`,
+`backoff_base`, `backoff_max`, `robots_text`, `adaptive_throttle`,
+`throttle_base_delay`, `throttle_max_delay`, and `user_agent` for polite,
+rate-limited crawling.
 
 ## Python
 

@@ -28,24 +28,48 @@ Want Electron-like TypeScript, tiny EXE?       -> Neutralino.js (no Chromium bun
 
 ## Threading bridge quick reference
 
-| Framework | Background primitive | UI bridge |
-|---|---|---|
-| C# / WPF, WinUI 3 | `Task.Run(...)` | `await` + `DispatcherQueue.TryEnqueue` / `Dispatcher.InvokeAsync` |
-| C# / WinForms | `Task.Run` | `this.Invoke(...)` |
-| Avalonia | `Task.Run` | `Dispatcher.UIThread.Post(...)` |
-| C++ / Qt | `QThread`, `QtConcurrent::run` | `QMetaObject::invokeMethod(target, ..., Qt::QueuedConnection)` |
-| Tauri (Rust) | `tokio::spawn` / `tauri::async_runtime::spawn` | `window.emit("event", payload)` |
-| Electron | `worker_threads` or child process | `mainWindow.webContents.send("event", payload)` |
-| Python / tkinter | `threading.Thread(daemon=True)` | `root.after(0, callback)` |
-| Python / PySide6 | `QThread` or `QThreadPool` | Signal/slot (auto-queued) |
-| Flutter Desktop | `Isolate.spawn` / `compute` | Stream / Completer |
-| Go (Fyne) | `go func()` | `fyne.Do(func(){...})` or channel |
-| Go (Wails) | `go func()` | `runtime.EventsEmit(ctx, "event", payload)` |
-| Go (walk) | `go func()` | `walk.Window.RunSafe(func(){...})` |
-| Kotlin (Compose Desktop) | `launch { ... }` (coroutine) | `withContext(Dispatchers.Main) { ... }` |
-| Kotlin (TornadoFX) | `runAsync { ... }` | UI thread auto (JavaFX Application Thread) |
-| Swift (SwiftUI) | `Task { ... }` | `@MainActor` or `await MainActor.run { ... }` |
-| Java / JavaFX | `Task` + `Service` | `Platform.runLater(...)` |
+| Framework | Template | Background primitive | UI bridge |
+|---|---|---|---|
+| C# / WPF | `scripts/threading_wpf.cs` | `Task.Run` | `Dispatcher.Invoke` |
+| C# / WinUI 3 | `scripts/threading_winui.cs` | `Task.Run` | `DispatcherQueue.TryEnqueue` |
+| C# / WinForms | `scripts/threading_winforms.cs` | `Task.Run` | `Control.BeginInvoke` |
+| C# / Avalonia | `scripts/threading_avalonia.cs` | `Task.Run` | `Dispatcher.UIThread.Post` |
+| C# / .NET MAUI | `scripts/threading_maui.cs` | `Task.Run` | `MainThread.BeginInvokeOnMainThread` |
+| C++ / Qt | `scripts/threading_qt.cpp` | `QThread` | queued signals |
+| Rust / Tauri | `scripts/threading_tauri.rs` | `spawn_blocking` / tokio | `AppHandle.emit` |
+| TypeScript / Electron | `scripts/threading_electron.ts` + worker | `worker_threads` | `webContents.send` |
+| Python / tkinter | `scripts/threading_tkinter.py` | `threading.Thread(daemon=True)` | `root.after(0, callback)` |
+| Python / PySide6 | `scripts/threading_pyside6.py` | `QThread` | Signal/slot (auto-queued) |
+| Python / GTK | `scripts/threading_glib.py` | `threading.Thread(daemon=True)` | `GLib.idle_add` |
+| Swift / SwiftUI | `scripts/threading_dispatch.swift` | `Task.detached` | `@MainActor` |
+| Java / JavaFX | `scripts/threading_javafx.java` | `Task` | `Platform.runLater` |
+| Kotlin / Compose Desktop | `scripts/threading_kotlin_compose.kt` | coroutine `Dispatchers.Default` | `Dispatchers.Main` |
+| Dart / Flutter Desktop | `scripts/threading_flutter.dart` | `Isolate.spawn` | `ReceivePort` |
+| Go / Wails | `scripts/threading_go_wails.go` | goroutine | `runtime.EventsEmit` |
+| Go / Fyne | `scripts/threading_go_fyne.go` | goroutine | `fyne.Do` |
+| Go / walk | `scripts/threading_go_walk.go` | goroutine | `window.RunSafe` |
+| Rust / egui | `scripts/threading_rust_egui.rs` | `std::thread` | channel + `request_repaint` |
+| Rust / Slint | `scripts/threading_rust_slint.rs` | `std::thread` | `upgrade_in_event_loop` |
+| C / Win32 | `scripts/threading_win32.c` | `CreateThread` | `PostMessage` (UI messages only) |
+
+Deep rules, worker-contract details, patterns, anti-patterns, and the full
+30-template map (22 single-worker + 8 pool templates) live in
+`references/threading_playbook.md`.
+
+### Concurrency pool quick reference
+
+| Framework | Pool template | Concurrency primitive | Retry |
+|---|---|---|---|
+| Python (any UI) | `scripts/threading_pool.py` | `ThreadPoolExecutor` | `RetryPolicy` |
+| Python / tkinter | `scripts/threading_pool_tkinter.py` | `WorkerPool` + `root.after` | `RetryPolicy` |
+| Python / PySide6 | `scripts/threading_pool_pyside6.py` | `QThreadPool` + `QRunnable` | `RetryPolicy` |
+| C# / .NET | `scripts/threading_pool_csharp.cs` | `Parallel.ForEachAsync` | `maxAttempts` |
+| Rust / Tauri | `scripts/threading_pool_tauri.rs` | `JoinSet` + `Semaphore` | re-queue pattern |
+| Kotlin / Compose | `scripts/threading_pool_kotlin_compose.kt` | coroutine `Semaphore` + `async` | re-queue pattern |
+| TypeScript / Electron | `scripts/threading_pool_electron.ts` | bounded `worker_threads` | `maxAttempts` |
+
+Pool templates are the default for independent batch jobs. Single-worker
+templates remain the default when the UI only ever runs one job at a time.
 
 ## Resource embedding quick reference
 
@@ -149,7 +173,8 @@ Want Electron-like TypeScript, tiny EXE?       -> Neutralino.js (no Chromium bun
 - **Project template**: `cargo create-tauri-app`.
 - **Recommended libs**: `tauri-plugin-dialog`, `tauri-plugin-fs`, `tauri-plugin-http`,
   `tauri-plugin-store`, `tokio` for async work.
-- **Packaging**: `cargo tauri build` produces NSIS + MSI in one step.
+- **Packaging**: `cargo tauri build` produces a single NSIS setup EXE by
+  default (`scripts/build_tauri.ps1`); add MSI with `-Targets msi`.
 
 ## Electron (JS/TS)
 

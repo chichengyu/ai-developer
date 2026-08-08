@@ -70,6 +70,20 @@ page / acceptance evidence for each item.
 | UI-17 | 表格提示与搜索栏分行 | required | |
 | UI-18 | 重型桌面端界面，禁止 Web 化 | required | |
 
+### 1.4 代码开发硬性要求（minimal-change hard requirements）
+
+All CODE-01..CODE-05 items in `SKILL.md` are mandatory whenever the task
+touches existing code, unless explicitly waived below. Fill in the waiver
+or the acceptance evidence for each item.
+
+| ID | 硬性要求 | Default | Waiver / acceptance |
+|---|---|---|---|
+| CODE-01 | 保留可用的原有逻辑 | required | |
+| CODE-02 | 改动范围最小 | required | |
+| CODE-03 | 增量扩展优先 | required | |
+| CODE-04 | 行为变更显式记录 | required | |
+| CODE-05 | 原功能回归验证 | required | |
+
 ---
 
 ## 2. Non-functional requirements
@@ -148,3 +162,4 @@ requirement. The showstopper is verified first in Step 6.
 - [ ] Showstopper is unambiguous
 - [ ] Every required field is filled
 - [ ] UI-01..UI-18 均已逐项填写或显式豁免（含原因与复审日期）
+- [ ] CODE-01..CODE-05 均已逐项填写或显式豁免（含原因与复审日期）
