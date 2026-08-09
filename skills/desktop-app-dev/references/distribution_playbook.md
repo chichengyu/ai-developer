@@ -116,6 +116,15 @@ a safe `-ExcludeModules` list (`unittest`, `pydoc`, `pydoc_data`,
 the app really imports one of them. UPX is opt-in (`-Upx`) because packed
 binaries can trigger AV false positives.
 
+Fast-start PySide6 builds use `-FastStart`: OneDir output, `--clean`,
+`--noconfirm`, `--disable-windowed-traceback`, `--optimize 1`, and a lean
+PySide6 exclusion list. Add `-InstallDeps` to pip install the project's
+`requirements.txt` automatically before PyInstaller runs, so recipients
+never install dependencies themselves. Optional Python modules are
+imported lazily at first use with `scripts/lazy_python_dependency.py` and
+bundled by the same build. Pass `-Paths scripts` and list each lazy module
+in `-HiddenImports` when the app imports from a local `scripts/` folder.
+
 ### Common pitfalls
 - **Missing module**: PyInstaller static analysis misses dynamic imports
   (`importlib.import_module`, `__import__("mod_" + name)`, plugin systems).
@@ -130,6 +139,10 @@ binaries can trigger AV false positives.
 - **Antivirus flags unsigned EXE**: see Signing below.
 - **Slow cold start**: PyInstaller extracts to a temp dir at launch. Switch to
   `--onedir` if cold start matters more than install footprint.
+  `scripts/build_python.ps1 -FastStart` does this automatically.
+- **Processes/threads left after close**: cancel `JobRunner`s in
+  `JobRegistry.shutdown_all()` and call `QThreadPool.waitForDone()` before
+  the window closes; terminate any sidecar `Popen` children.
 
 ### Source preservation (your stated requirement)
 - Bundle source with `--add-data "src;src"` and self-extract on first run:

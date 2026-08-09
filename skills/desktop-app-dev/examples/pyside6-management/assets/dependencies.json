@@ -1,0 +1,28 @@
+{
+  "app_name": "PySide6Management",
+  "help": "依赖中心会自动下载并安装本软件所需的全部依赖，下载使用分片并发和断点续传。你只需点击“安装依赖”。如果你想手动安装，请按下方每个依赖的“手动安装”说明操作。",
+  "dependencies": [
+    {
+      "name": "openpyxl",
+      "kind": "pip",
+      "url": "openpyxl",
+      "module_name": "openpyxl",
+      "pip_target": "py-deps",
+      "note": "Excel export",
+      "description": "用于导出 Excel 表格的 Python 库。",
+      "homepage": "https://openpyxl.readthedocs.io/en/stable/",
+      "manual_install": "自动安装：点击上方“安装依赖”。手动安装：打开 https://pypi.org/project/openpyxl/ 下载适合本机的版本，解压到 %LOCALAPPDATA%\\PySide6Management\\runtime\\py-deps，然后重启软件。"
+    },
+    {
+      "name": "et-xmlfile",
+      "kind": "pip",
+      "url": "et-xmlfile",
+      "module_name": "et_xmlfile",
+      "pip_target": "py-deps",
+      "note": "openpyxl dependency",
+      "description": "openpyxl 读取 XML 文件所需的依赖库。",
+      "homepage": "https://pypi.org/project/et-xmlfile/",
+      "manual_install": "自动安装：点击上方“安装依赖”。手动安装：打开 https://pypi.org/project/et-xmlfile/ 下载适合本机的版本，解压到 %LOCALAPPDATA%\\PySide6Management\\runtime\\py-deps，然后重启软件。"
+    }
+  ]
+}

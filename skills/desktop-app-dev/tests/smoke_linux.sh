@@ -77,12 +77,21 @@ for node in ast.walk(tree):
         for t in node.targets
     ):
         if isinstance(node.value, ast.Dict):
-            xk_names = {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+            xk_values = {
+                k.value: v.value
+                for k, v in zip(node.value.keys, node.value.values)
+                if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)
+            }
+            xk_names = set(xk_values)
 assert 'f5' in xk_names, 'f5 missing'
 assert 'left' in xk_names, 'left missing'
 assert 'enter' in xk_names, 'enter missing'
 assert 'control_l' in xk_names, 'control_l missing (X11-specific)'
 assert 'super_l' in xk_names, 'super_l missing (X11-specific)'
+assert xk_values.get('f5') == 0xFFC2, 'f5 must be XK_F5 (0xFFC2)'
+assert xk_values.get('left') == 0xFF51, 'left must be XK_Left (0xFF51)'
+assert xk_values.get('enter') == 0xFF0D, 'enter must be XK_Return (0xFF0D)'
+assert xk_values.get('control_l') == 0xFFE3, 'control_l must be XK_Control_L (0xFFE3)'
 assert len(xk_names) >= 70, f'expected >= 70 XKs, got {len(xk_names)}'
 print(f'  sendinput_linux.py: {len(xk_names)} XK entries')
 "
@@ -125,6 +134,8 @@ if command -v python3 >/dev/null 2>&1; then
     run "test_no_bom.py" python3 "$SKILL_ROOT/tests/test_no_bom.py"
     run "test_threading_templates.py" python3 "$SKILL_ROOT/tests/test_threading_templates.py"
     run "test_threading_concurrency.py" python3 "$SKILL_ROOT/tests/test_threading_concurrency.py"
+    run "test_pyside6_management.py" python3 "$SKILL_ROOT/tests/test_pyside6_management.py"
+    run "test_dependency_center.py" python3 "$SKILL_ROOT/tests/test_dependency_center.py"
 fi
 
 # 6. Arch awareness (optional, requires PowerShell)

@@ -1,0 +1,67 @@
+{
+  "fingerprint_binding": "chrome126",
+  "fetch": {
+    "backend": "auto",
+    "auto_install": false
+  },
+  "browser": {
+    "engine": "auto",
+    "headless": true,
+    "max_attempts": 1,
+    "retry_delay": 1,
+    "auto_install": false
+  },
+  "targets": [
+    {
+      "name": "cloudflare-example",
+      "url": "https://example.com/",
+      "kind": "page",
+      "expected_status": [200],
+      "expected_marker": "Example Domain",
+      "checks": ["http"]
+    },
+    {
+      "name": "cloudflare-turnstile-product",
+      "url": "https://www.cloudflare.com/products/turnstile/",
+      "kind": "page",
+      "expected_status": [200],
+      "checks": ["http"]
+    },
+    {
+      "name": "stealth-detect-page",
+      "url": "https://bot.sannysoft.com/",
+      "kind": "page",
+      "expected_status": [200],
+      "checks": ["http"]
+    },
+    {
+      "name": "browser-example",
+      "url": "https://example.com/",
+      "kind": "page",
+      "expected_status": [200],
+      "expected_marker": "Example Domain",
+      "checks": ["browser"],
+      "skip_without": ["browser"]
+    },
+    {
+      "name": "cloudflare-challenge-glassdoor",
+      "url": "https://www.glassdoor.com/",
+      "kind": "cloudflare",
+      "expected_status": [200],
+      "checks": ["bypass"],
+      "timeout": 45,
+      "max_attempts": 1,
+      "skip_without": ["browser", "proxy_pool"]
+    },
+    {
+      "name": "akamai-farfetch",
+      "url": "https://www.farfetch.com/",
+      "kind": "cloudflare",
+      "expected_status": [200],
+      "checks": ["bypass"],
+      "timeout": 45,
+      "max_attempts": 1,
+      "skip_without": ["browser"]
+    }
+  ]
+}

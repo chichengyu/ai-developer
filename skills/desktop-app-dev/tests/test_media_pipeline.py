@@ -47,6 +47,22 @@ from cloudflare_challenge import (  # noqa: E402
 )
 from data_processor import load_records, process_records, save_records  # noqa: E402
 from deep_crawler import CrawlConfig, DeepCrawler  # noqa: E402
+from ensure_all_dependencies import (  # noqa: E402
+    ensure as ensure_all_dependencies,
+)
+from ensure_all_dependencies import (  # noqa: E402
+    status as ensure_all_status,
+)
+from ensure_web_fetch_dependencies import (  # noqa: E402
+    DependencyInstallError,
+    missing_packages,
+)
+from ensure_web_fetch_dependencies import (  # noqa: E402
+    check_status as ensure_status,
+)
+from ensure_web_fetch_dependencies import (  # noqa: E402
+    ensure as ensure_dependencies,
+)
 from ffmpeg_transcoder import (  # noqa: E402
     EXTENSION_PROFILE,
     TRANSCODE_PROFILES,
@@ -68,8 +84,13 @@ from file_converter import (  # noqa: E402
     convert_many,
     extract_archive,
 )
+from flaresolverr import FlaresolverrClient  # noqa: E402
 from hls_downloader import download_hls  # noqa: E402
-from media_dependencies import _zip_member_is_safe, check_status  # noqa: E402
+from media_dependencies import (  # noqa: E402
+    _zip_member_is_safe,
+    check_status,
+    install_dependencies,
+)
 from media_downloader import (  # noqa: E402
     BatchDownloadResult,
     DownloadHashError,
@@ -108,6 +129,18 @@ from scrape_guard import (  # noqa: E402
     RobotsPolicy,
 )
 from security_detector import SecurityReport, detect_security_mechanisms  # noqa: E402
+from smart_fetch import (  # noqa: E402
+    BackendResponse,
+    SmartFetchSession,
+    available_backends,
+    backend_status,
+    create_fetch_session,
+)
+from stealth_browser import (  # noqa: E402
+    StealthBrowserError,
+    available_stealth_engines,
+    solve_cloudflare_with_stealth_browser,
+)
 from task_queue import TaskQueue  # noqa: E402
 from task_scheduler import TaskScheduler, next_run_after  # noqa: E402
 from web_data_pipeline import (  # noqa: E402
@@ -344,6 +377,48 @@ class _CookieEchoHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+class _FlaresolverrHandler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        command = payload.get("cmd")
+        if command == "request.get":
+            body = {
+                "status": "ok",
+                "message": "",
+                "solution": {
+                    "url": payload.get("url", "https://example.com/"),
+                    "status": 200,
+                    "headers": {"content-type": "text/html"},
+                    "response": "<html><body>solved</body></html>",
+                    "cookies": [
+                        {
+                            "name": "cf_clearance",
+                            "value": "abc123",
+                            "domain": ".example.com",
+                            "path": "/",
+                            "secure": True,
+                            "sameSite": "None",
+                        }
+                    ],
+                    "userAgent": "Mozilla/5.0 solved",
+                },
+            }
+        elif command == "sessions.list":
+            body = {"status": "ok", "sessions": ["s1"]}
+        else:
+            body = {"status": "error", "message": "unsupported"}
+        encoded = json.dumps(body).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
 
     def log_message(self, format: str, *args: object) -> None:
         pass
@@ -1219,6 +1294,13 @@ def test_dependencies_status() -> None:
     for key in (
         "playwright",
         "pycryptodome",
+        "curl_cffi",
+        "cloudscraper",
+        "httpx",
+        "h2",
+        "patchright",
+        "nodriver",
+        "drission_page",
         "ocr",
         "chromium",
         "ffmpeg",
@@ -1611,6 +1693,23 @@ def test_cloudflare_state_extraction() -> None:
     assert state.stage == "passed"
     assert not state.present
 
+    expired = extract_cloudflare_state(
+        "<html><body>ok</body></html>",
+        "https://example.com/",
+        cookies=[
+            {
+                "name": "cf_clearance",
+                "value": "old",
+                "domain": "example.com",
+                "path": "/",
+                "expires": 1,
+            }
+        ],
+    )
+    assert expired.clearance_cookie == "old"
+    assert not expired.clearance_valid
+    assert expired.stage == "none"
+
     blocked_html = (
         "<html><head><title>Attention Required! | Cloudflare</title></head>"
         "<body>error code 1020</body></html>"
@@ -1651,6 +1750,229 @@ def test_cloudflare_challenge_handler() -> None:
     assert result.strategy == "clearance"
     assert result.cf_clearance == "abc123"
     assert result.clearance_cookie is not None
+
+
+def test_smart_fetch_factory_and_status() -> None:
+    assert isinstance(create_fetch_session({"backend": "standard"}), MediaSession)
+    assert isinstance(create_fetch_session({"backend": "auto"}), SmartFetchSession)
+    assert "urllib" in available_backends()
+    status = backend_status()
+    assert status["backends"][-1]["name"] == "urllib"
+
+
+def test_smart_fetch_auto_fallback_local() -> None:
+    base, server = _start_server({"/page.html": b"<html><body>ok</body></html>"})
+    try:
+        session = SmartFetchSession(min_interval=0.0, max_retries=0)
+        body, status, headers = session.get_bytes_with_meta(f"{base}/page.html")
+        assert status == 200
+        assert b"<html><body>ok</body></html>" in body
+        assert session.stats["last_backend"] in {
+            "curl_cffi",
+            "cloudscraper",
+            "httpx",
+            "urllib",
+        }
+    finally:
+        server.shutdown()
+
+
+def test_smart_fetch_switches_backend() -> None:
+    session = SmartFetchSession(min_interval=0.0, max_retries=0)
+    calls: list[str] = []
+
+    def fake_try_backend(
+        name: str,
+        url: str,
+        headers: dict[str, str],
+        method: str | None = None,
+        data: bytes | None = None,
+        timeout: float | None = None,
+    ) -> BackendResponse:
+        calls.append(name)
+        if name == "curl_cffi":
+            return BackendResponse(
+                url=url,
+                status=403,
+                headers={"Content-Type": "text/html"},
+                body=b"Access Denied",
+                backend="curl_cffi",
+            )
+        return BackendResponse(
+            url=url,
+            status=200,
+            headers={"Content-Type": "text/plain"},
+            body=b"ok",
+            backend="urllib",
+        )
+
+    with (
+        mock.patch("smart_fetch.available_backends", return_value=["curl_cffi", "urllib"]),
+        mock.patch.object(session, "_try_backend", side_effect=fake_try_backend),
+    ):
+        body, status, _ = session.get_bytes_with_meta("http://example.com/page")
+    assert status == 200
+    assert body == b"ok"
+    assert calls == ["curl_cffi", "urllib"]
+    assert session.stats["switches"] == 1
+
+
+def test_smart_fetch_blocked_metadata() -> None:
+    base, server = _start_server({"/blocked": b"ignored"}, _BlockingHandler)
+    _BlockingHandler.blocked_paths = {"/blocked"}
+    try:
+        session = SmartFetchSession(min_interval=0.0, max_retries=0)
+        body, status, _ = session.get_bytes_with_meta(f"{base}/blocked")
+        assert status == 403
+        assert b"Access Denied" in body
+        assert session.stats["last_backend"] == "urllib"
+        assert session.stats["last_security_kind"] == "waf_blocked"
+    finally:
+        _BlockingHandler.blocked_paths = set()
+        server.shutdown()
+
+
+def test_smart_fetch_preserves_clearance_cookie() -> None:
+    session = SmartFetchSession(min_interval=0.0, max_retries=0)
+    session.load_cookies(
+        [
+            {
+                "name": "cf_clearance",
+                "value": "abc123",
+                "domain": "example.com",
+                "path": "/",
+                "secure": True,
+            }
+        ]
+    )
+    assert "cf_clearance=abc123" in session._cookie_header("https://example.com/")
+    assert session._cookie_header("http://example.com/") == ""
+
+
+def test_ensure_web_fetch_dependencies_status() -> None:
+    status = ensure_status()
+    names = {item["name"] for item in status["packages"]}
+    assert names == {
+        "curl_cffi",
+        "cloudscraper",
+        "httpx",
+        "h2",
+        "patchright",
+        "nodriver",
+        "DrissionPage",
+    }
+    assert set(missing_packages()).issubset(names)
+    check = ensure_dependencies(install=False)
+    assert check["ready"] == status["ready"]
+
+
+def test_ensure_web_fetch_dependencies_frozen_install_blocked() -> None:
+    original = getattr(sys, "frozen", None)
+    try:
+        sys.frozen = True
+        with mock.patch("ensure_web_fetch_dependencies._module_available", return_value=False):
+            try:
+                ensure_dependencies(install=True, packages=["curl_cffi"])
+            except DependencyInstallError as exc:
+                assert "not bundled" in str(exc)
+            else:
+                raise AssertionError("frozen web-fetch install should be blocked")
+    finally:
+        if original is None:
+            del sys.frozen
+        else:
+            sys.frozen = original
+
+
+def test_media_dependencies_frozen_install_blocked() -> None:
+    original = getattr(sys, "frozen", None)
+    try:
+        sys.frozen = True
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                install_dependencies(install=True, runtime_dir=tmp)
+            except RuntimeError as exc:
+                assert "not bundled" in str(exc)
+            else:
+                raise AssertionError("frozen media install should be blocked")
+    finally:
+        if original is None:
+            del sys.frozen
+        else:
+            sys.frozen = original
+
+
+def test_ensure_all_dependencies_status() -> None:
+    result = ensure_all_status()
+    assert set(result) == {"web_fetch", "media", "manifest", "ready"}
+    assert isinstance(result["ready"], bool)
+
+
+def test_ensure_all_dependencies_frozen_install_blocked() -> None:
+    original = getattr(sys, "frozen", None)
+    try:
+        sys.frozen = True
+        try:
+            ensure_all_dependencies(install=True)
+        except RuntimeError as exc:
+            assert "not bundled" in str(exc)
+        else:
+            raise AssertionError("frozen unified install should be blocked")
+    finally:
+        if original is None:
+            del sys.frozen
+        else:
+            sys.frozen = original
+
+
+def test_smart_fetch_auto_install_hook() -> None:
+    session = SmartFetchSession(
+        backend="auto",
+        auto_install_dependencies=True,
+        min_interval=0.0,
+        max_retries=0,
+    )
+    with mock.patch.object(session, "_ensure_dependencies") as ensure_mock:
+        order = session._ordered_backends()
+    ensure_mock.assert_called_once_with()
+    assert "urllib" in order
+
+
+def test_flaresolverr_client_parses_solution() -> None:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _FlaresolverrHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        client = FlaresolverrClient(base_url=base, timeout=5)
+        result = client.request_get("https://example.com/")
+        assert result.status == 200
+        assert "solved" in result.body
+        assert any(item["name"] == "cf_clearance" for item in result.cookies)
+        assert client.list_sessions() == ["s1"]
+    finally:
+        server.shutdown()
+
+
+def test_smart_fetch_flaresolverr_backend_order() -> None:
+    session = SmartFetchSession(
+        backend="auto",
+        flaresolverr_config={"base_url": "http://127.0.0.1:8191"},
+        auto_install_dependencies=False,
+        min_interval=0.0,
+        max_retries=0,
+    )
+    assert "flaresolverr" in session._ordered_backends()
+
+
+def test_stealth_browser_engine_availability() -> None:
+    engines = set(available_stealth_engines())
+    assert engines.issubset({"patchright", "nodriver", "drission_page"})
+    try:
+        solve_cloudflare_with_stealth_browser("https://example.com/", engine="unsupported")
+        raise AssertionError("unsupported engine must raise")
+    except StealthBrowserError:
+        pass
 
 
 def test_deep_crawler_links_sitemap_robots() -> None:
@@ -1769,7 +2091,12 @@ def test_api_client_blocked_metadata() -> None:
     base = f"http://127.0.0.1:{server.server_port}"
     _BlockingHandler.blocked_paths = {"/api"}
     try:
-        client = ApiClient(min_interval=0.0, max_retries=0)
+        client = ApiClient(
+            min_interval=0.0,
+            max_retries=0,
+            backend="auto",
+            auto_install=False,
+        )
         results = client.fetch_all([ApiSpec(method="GET", url=f"{base}/api")])
         result = results[0]
         assert result.status == 403
@@ -1985,6 +2312,8 @@ def test_api_client_cookies() -> None:
             cookies=[{"name": "sid", "value": "abc", "domain": "127.0.0.1", "path": "/"}],
             min_interval=0.0,
             max_retries=0,
+            backend="auto",
+            auto_install=False,
         )
         data = client.fetch_spec(ApiSpec(method="GET", url=f"{base}/echo"))
         assert "sid=abc" in data["cookie"], data
@@ -2983,6 +3312,20 @@ def run() -> int:
         test_security_detector_classifications,
         test_cloudflare_state_extraction,
         test_cloudflare_challenge_handler,
+        test_smart_fetch_factory_and_status,
+        test_smart_fetch_auto_fallback_local,
+        test_smart_fetch_switches_backend,
+        test_smart_fetch_blocked_metadata,
+        test_smart_fetch_preserves_clearance_cookie,
+        test_ensure_web_fetch_dependencies_status,
+        test_ensure_web_fetch_dependencies_frozen_install_blocked,
+        test_media_dependencies_frozen_install_blocked,
+        test_ensure_all_dependencies_status,
+        test_ensure_all_dependencies_frozen_install_blocked,
+        test_smart_fetch_auto_install_hook,
+        test_flaresolverr_client_parses_solution,
+        test_smart_fetch_flaresolverr_backend_order,
+        test_stealth_browser_engine_availability,
         test_deep_crawler_links_sitemap_robots,
         test_deep_crawler_blocked_skip,
         test_media_session_error_metadata,

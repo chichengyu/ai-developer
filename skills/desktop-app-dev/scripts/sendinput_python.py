@@ -20,7 +20,7 @@ for letter, code in zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", range(0x41, 0x5B), strict=
 for digit, code in zip("0123456789", range(0x30, 0x3A), strict=False):
     VK[digit] = code
 for i in range(1, 25):
-    VK[f"f{i}"] = 0x6F + i - 1
+    VK[f"f{i}"] = 0x70 + i - 1
 for i in range(0, 10):
     VK[f"num{i}"] = 0x60 + i
 VK.update(

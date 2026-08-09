@@ -108,6 +108,26 @@ def main() -> int:
             print(f"  [FAIL] {name}: missing special keys: {', '.join(missing)}")
             failures += len(missing)
 
+    if canonical.get("f1") != 0x70 or canonical.get("f24") != 0x87:
+        print("  [FAIL] vk_table.json F-key range must be VK_F1 (0x70) to VK_F24 (0x87)")
+        failures += 1
+    f_key_patterns = {
+        "sendinput_python.py": r"0x70\s*\+\s*i\s*-\s*1",
+        "sendinput_dotnet.cs": r"0x70\s*\+\s*i\s*-\s*1",
+        "SendInput.java": r"0x70\s*\+\s*i\s*-\s*1",
+        "sendinput_rust.rs": r"0x70\s*\+\s*i\s*-\s*1",
+        "sendinput_go.go": r"0x70\s*\+\s*i\s*-\s*1",
+        "sendinput_dart.dart": r"0x70\s*\+\s*i\s*-\s*1",
+        "sendinput_node.ts": r"0x70\s*\+\s*i\s*-\s*1",
+        "sendinput_swift.swift": r"0x70\s*\+\s*n\s*-\s*1",
+        "sendinput_kotlin.kt": r"0x70\s*\+\s*it\s*-\s*1",
+        "sendinput_win32.c": r"VK_F1\s*\+\s*n\s*-\s*1",
+    }
+    for name, pattern in f_key_patterns.items():
+        if not re.search(pattern, (ROOT / name).read_text(encoding="utf-8")):
+            print(f"  [FAIL] {name}: F-key mapping must start at VK_F1 (0x70)")
+            failures += 1
+
     if failures:
         print(f"\n{failures} VK mismatch(es).")
         return 1

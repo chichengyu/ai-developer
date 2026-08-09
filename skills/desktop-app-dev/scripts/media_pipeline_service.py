@@ -564,8 +564,8 @@ class MediaPipelineService:
         account: dict[str, Any] | None = None,
         proxy_pool_store: ProxyPoolStore | None = None,
     ):
-        from media_session import MediaSession
         from scrape_guard import AdaptiveThrottle, RobotsPolicy
+        from smart_fetch import create_fetch_session
 
         headers = payload.get("headers")
         proxy = payload.get("proxy")
@@ -592,7 +592,11 @@ class MediaPipelineService:
                 base_delay=float(payload.get("throttle_base_delay", 1.0)),
                 max_delay=float(payload.get("throttle_max_delay", 60.0)),
             )
-        session = MediaSession(
+        fetch_config = payload.get("fetch")
+        if not isinstance(fetch_config, dict):
+            fetch_config = {"backend": "standard"}
+        session = create_fetch_session(
+            fetch_config,
             headers=headers,
             proxy=proxy,
             proxy_pool=MediaPipelineService._resolve_proxy_pool(

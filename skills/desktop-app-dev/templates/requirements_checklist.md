@@ -42,6 +42,7 @@ coding starts. Items marked **required** must be answered. Items marked
 | F-IMP-10 | Time / date handling | `DateTimeOffset` only | |
 | F-IMP-11 | Clean shutdown on logoff | Trap `WM_QUERYENDSESSION` | |
 | F-IMP-12 | Uninstall cleanup | Remove app data on uninstall | |
+| F-IMP-13 | Startup animation + progress bar | Show splash before main window | |
 
 ### 1.3 界面硬性要求（UI hard requirements）
 
@@ -69,7 +70,7 @@ page / acceptance evidence for each item.
 | UI-16 | 滚动条明显且图标显示 | required | |
 | UI-17 | 表格提示与搜索栏分行 | required | |
 | UI-18 | 重型桌面端界面，禁止 Web 化 | required | |
-| UI-19 | 内置依赖中心：点击安装自动极速下载/安装/配置，无需用户介入 | required | |
+| UI-19 | 内置依赖中心：菜单列出全部依赖，点击安装自动分片下载/安装/配置，无需其他操作 | required | |
 
 ### 1.4 代码开发硬性要求（minimal-change hard requirements）
 

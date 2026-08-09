@@ -26,6 +26,7 @@ from page_data_parser import PageDataAnalysis, analyze_page
 from proxy_pool import ProxyPool
 from scrape_guard import RobotsPolicy
 from security_detector import SecurityReport, detect_security_mechanisms
+from smart_fetch import create_fetch_session
 
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 
@@ -55,6 +56,8 @@ class CrawlConfig:
     backoff_max: float = 30.0
     timeout: float = 20.0
     max_sitemap_urls: int = 1000
+    fetch_backend: str = "standard"
+    fetch_auto_install: bool | None = None
     extension_skip: tuple[str, ...] = (
         ".jpg",
         ".jpeg",
@@ -115,6 +118,8 @@ class CrawlConfig:
             backoff_max=float(values.get("backoff_max", 30.0)),
             timeout=float(values.get("timeout", 20.0)),
             max_sitemap_urls=int(values.get("max_sitemap_urls", 1000)),
+            fetch_backend=str(values.get("fetch_backend") or "standard"),
+            fetch_auto_install=values.get("fetch_auto_install"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -138,6 +143,8 @@ class CrawlConfig:
             "backoff_max": self.backoff_max,
             "timeout": self.timeout,
             "max_sitemap_urls": self.max_sitemap_urls,
+            "fetch_backend": self.fetch_backend,
+            "fetch_auto_install": self.fetch_auto_install,
             "extension_skip": list(self.extension_skip),
         }
 
@@ -256,7 +263,11 @@ class DeepCrawler:
 
     def _default_session(self) -> MediaSession:
         if self.session is None:
-            self.session = MediaSession(
+            self.session = create_fetch_session(
+                {
+                    "backend": self.config.fetch_backend,
+                    "auto_install": self.config.fetch_auto_install,
+                },
                 headers=self.config.headers,
                 proxy=self.config.proxy,
                 proxy_pool=self.config.proxy_pool,
@@ -538,6 +549,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--proxy", default=None)
     parser.add_argument("--min-interval", type=float, default=0.0)
     parser.add_argument("--max-retries", type=int, default=0)
+    parser.add_argument(
+        "--fetch-backend",
+        default="standard",
+        help="standard or auto (curl_cffi -> cloudscraper -> httpx -> urllib)",
+    )
+    parser.add_argument(
+        "--auto-install",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="auto-install missing optional web-fetch packages (default: auto mode installs)",
+    )
     args = parser.parse_args(argv)
 
     config = CrawlConfig(
@@ -552,6 +574,8 @@ def main(argv: list[str] | None = None) -> int:
         proxy=args.proxy,
         min_interval=args.min_interval,
         max_retries=args.max_retries,
+        fetch_backend=args.fetch_backend,
+        fetch_auto_install=args.auto_install,
     )
     result = DeepCrawler(config).crawl()
     text = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)

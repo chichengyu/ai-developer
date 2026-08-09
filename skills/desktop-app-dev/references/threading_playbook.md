@@ -45,7 +45,9 @@ example the Rust channel helpers) document the equivalent call names.
    from two threads.
 6. **Graceful shutdown.** Cancel workers before the window closes, wait for
    them with a bounded timeout, and do not leave daemon threads doing file
-   or network writes.
+   or network writes. PySide6 apps can track runners in `JobRegistry` and
+   call `shutdown_all()` on close; pools expose the same bounded
+   `shutdown(timeout_ms)`.
 
 ## 3. Template map
 
@@ -60,7 +62,7 @@ example the Rust channel helpers) document the equivalent call names.
 | Tauri (Rust) | `scripts/threading_tauri.rs` | `spawn_blocking` / tokio | `AppHandle.emit` | `AtomicBool` |
 | Electron | `scripts/threading_electron.ts` + `threading_electron_worker.ts` | `worker_threads` | `webContents.send` | worker cancel message |
 | Python tkinter | `scripts/threading_tkinter.py` | `threading.Thread(daemon=True)` | `root.after(0, cb)` | `threading.Event` |
-| Python PySide6 | `scripts/threading_pyside6.py` | `QThread` + worker | Signal/slot | `CancelToken` |
+| Python PySide6 | `scripts/threading_pyside6.py` | `QThread` + worker + `JobRegistry` | Signal/slot | `CancelToken` |
 | Python GTK | `scripts/threading_glib.py` | `threading.Thread(daemon=True)` | `GLib.idle_add` | `threading.Event` |
 | Swift / SwiftUI | `scripts/threading_dispatch.swift` | `Task.detached` | `@MainActor` | `Task.cancel()` |
 | Java / JavaFX | `scripts/threading_javafx.java` | `Task` | `Platform.runLater` / Task properties | `Task.cancel()` |
@@ -260,5 +262,7 @@ kill isolates; cooperative cancellation is the only portable option.
 - [ ] Pool `cancel()` cancels pending futures and asks running tasks to stop.
 - [ ] Retry/backoff is configured at the pool level for transient failures.
 - [ ] Window close cancels jobs and waits with a bounded timeout.
+- [ ] PySide6 apps register runners in `JobRegistry` and call
+  `shutdown_all()` plus `QThreadPool.waitForDone()` on close.
 - [ ] Shared mutable state has a clear owner or lock.
 - [ ] Threading template matches the framework in the template map above.

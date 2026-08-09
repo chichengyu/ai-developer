@@ -1,0 +1,4 @@
+interface:
+  display_name: "Anti-Bot Web Scraper"
+  short_description: "Multi-backend scraper with Cloudflare and Turnstile bypass."
+  default_prompt: "Use $anti-bot-web-scraper to build a scraper for a Cloudflare-protected site."

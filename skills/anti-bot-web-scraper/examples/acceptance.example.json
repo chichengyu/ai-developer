@@ -1,0 +1,47 @@
+{
+  "fingerprint_binding": "chrome126",
+  "fetch": {
+    "backend": "auto",
+    "auto_install": false
+  },
+  "browser": {
+    "engine": "auto",
+    "headless": true
+  },
+  "captcha": {
+    "provider": "capsolver",
+    "api_key_env": "CAPSOLVER_API_KEY"
+  },
+  "proxy_pool": {
+    "min_pool_size": 5,
+    "refill_threshold": 2,
+    "auto_remove_on_fail": true,
+    "source": {
+      "url": "https://provider.example/api/list",
+      "format": "json",
+      "json_path": "data",
+      "proxy_field": "proxy",
+      "country_field": "country",
+      "city_field": "city",
+      "timeout": 20
+    }
+  },
+  "targets": [
+    {
+      "name": "cloudflare-basic",
+      "url": "https://example.com/",
+      "kind": "page",
+      "expected_status": [200],
+      "expected_marker": "Example Domain",
+      "checks": ["http", "browser"],
+      "skip_without": ["browser"]
+    },
+    {
+      "name": "captcha-provider-balance",
+      "url": "https://example.com/",
+      "kind": "captcha",
+      "sitekey": "0x0000000000000000000000000000000000000000",
+      "skip_without": ["captcha"]
+    }
+  ]
+}

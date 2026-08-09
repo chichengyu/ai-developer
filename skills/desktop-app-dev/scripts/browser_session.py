@@ -282,11 +282,13 @@ class BrowserSession:
         action_interval: float = 0.0,
         action_jitter: float = 0.2,
         storage_state: str | Path | None = None,
+        engine: str = "playwright",
     ) -> None:
         self.headless = headless
         self.proxy = proxy
         self.user_data_dir = Path(user_data_dir) if user_data_dir else None
         self.fingerprint = fingerprint or FingerprintOptions()
+        self.engine = str(engine or "playwright").lower()
         self._storage_state_path = Path(storage_state) if storage_state else None
         self._action_limiter = (
             RateLimiter(min_interval=action_interval, jitter=action_jitter)
@@ -302,11 +304,20 @@ class BrowserSession:
         self._network: list[NetworkEntry] = []
 
     def start(self) -> None:
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError as exc:
-            raise RuntimeError("pip install playwright && playwright install chromium") from exc
-        self._playwright = sync_playwright().start()
+        _sync_playwright: Any
+        if self.engine == "patchright":
+            try:
+                from patchright.sync_api import sync_playwright as _sync_playwright
+            except ImportError as exc:
+                raise RuntimeError(
+                    "pip install patchright && python -m patchright install chromium"
+                ) from exc
+        else:
+            try:
+                from playwright.sync_api import sync_playwright as _sync_playwright
+            except ImportError as exc:
+                raise RuntimeError("pip install playwright && playwright install chromium") from exc
+        self._playwright = _sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=self.headless)
         kwargs = self.fingerprint.to_context_kwargs()
         if self.proxy:

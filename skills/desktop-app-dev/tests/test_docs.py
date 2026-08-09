@@ -40,10 +40,12 @@ def main() -> int:
         sum(1 for line in skill if line == "## 界面硬性要求（UI hard requirements）") == 1,
         "SKILL.md must contain exactly one 界面硬性要求 heading",
     )
-    ui_ids = [f"UI-{i:02d}" for i in range(1, 20)]
     skill_text = "\n".join(skill)
-    for uid in ui_ids:
-        check(f"| {uid} |" in skill_text, f"SKILL.md missing {uid} table row")
+    check(
+        "UI-01..UI-19" in skill_text and "references/ui_hard_requirements.md" in skill_text,
+        "SKILL.md must point to UI-01..UI-19 reference instead of embedding the table",
+    )
+    ui_ids = [f"UI-{i:02d}" for i in range(1, 20)]
     code_ids = [f"CODE-{i:02d}" for i in range(1, 6)]
     check(
         sum(
@@ -82,6 +84,36 @@ def main() -> int:
                 continue
             if not (ROOT / ref).exists():
                 check(False, f"missing relative reference: {ref} in {md.relative_to(ROOT)}")
+
+    local_script_symbols: dict[str, set[str]] = {}
+    for script in (ROOT / "scripts").glob("*.py"):
+        try:
+            tree = ast.parse(script.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        symbols: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                symbols.add(node.name)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        symbols.add(target.id)
+        local_script_symbols[script.stem] = symbols
+    import_re = re.compile(r"from\s+(\w+)\s+import\s+([A-Za-z0-9_]+(?:\s*,\s*[A-Za-z0-9_]+)*)")
+    for md in ROOT.rglob("*.md"):
+        text = md.read_text(encoding="utf-8")
+        for match in import_re.finditer(text):
+            module, names = match.group(1), match.group(2)
+            if module not in local_script_symbols:
+                continue
+            for name in (part.strip() for part in names.split(",")):
+                if not name:
+                    continue
+                check(
+                    name in local_script_symbols[module],
+                    f"{md.relative_to(ROOT)} imports missing {module}.{name}",
+                )
 
     for md in ROOT.rglob("*.md"):
         headings = [
@@ -433,10 +465,16 @@ def main() -> int:
         "ffmpeg_transcoder.py",
         "platform_publisher.py",
         "builtin_dependency_manager.py",
+        "dependency_center.py",
         "media_dependencies.py",
+        "ensure_all_dependencies.py",
+        "ensure_web_fetch_dependencies.py",
         "media_pipeline_service.py",
         "setup_media_dependencies.ps1",
         "api_client.py",
+        "smart_fetch.py",
+        "flaresolverr.py",
+        "stealth_browser.py",
         "data_processor.py",
         "web_data_pipeline.py",
         "api_analyzer.py",
@@ -474,6 +512,8 @@ def main() -> int:
             "security_detector.py",
             "cloudflare_challenge.py",
             "deep_crawler.py",
+            "flaresolverr.py",
+            "stealth_browser.py",
             "Cloudflare",
             "cf_clearance",
             "turnstile",
@@ -586,7 +626,7 @@ def main() -> int:
     threading = list((ROOT / "scripts").glob("threading_*"))
     sendinput = list((ROOT / "scripts").glob("sendinput_*"))
     window_enum = list((ROOT / "scripts").glob("window_enum*"))
-    check(len(examples) == 9, f"examples count = {len(examples)}, expected 9")
+    check(len(examples) == 10, f"examples count = {len(examples)}, expected 10")
     check(len(build_ps1) == 14, f"build_*.ps1 count = {len(build_ps1)}, expected 14")
     check(len(threading) == 30, f"threading_* count = {len(threading)}, expected 30")
     check(len(sendinput) == 11, f"sendinput_* count = {len(sendinput)}, expected 11")
@@ -637,6 +677,10 @@ def main() -> int:
         len(framework_keys) == 24, f"selector FRAMEWORKS count = {len(framework_keys)}, expected 24"
     )
     check("walk" in framework_keys, "selector missing walk framework")
+    check(
+        "--language" in selector_text and "LANGUAGE_UI_PROFILES" in selector_text,
+        "selector missing language-first UI candidate mode",
+    )
     check(
         'w["macos_x64_arch"]' in selector_text and 'w["linux_x64_arch"]' in selector_text,
         "selector derive_weights must map macOS/Linux x64 architecture weights",
@@ -860,12 +904,25 @@ def main() -> int:
     smoke_macos_text = (ROOT / "tests" / "smoke_macos.sh").read_text(encoding="utf-8")
     smoke_windows_text = (ROOT / "tests" / "smoke_windows.ps1").read_text(encoding="utf-8")
     ci_text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    python_test_files = (
+        "test_docs.py",
+        "test_media_pipeline.py",
+        "test_no_bom.py",
+        "test_threading_templates.py",
+        "test_threading_concurrency.py",
+        "test_pyside6_management.py",
+        "test_dependency_center.py",
+    )
     check(
-        "test_docs.py" in smoke_linux_text and "test_media_pipeline.py" in smoke_linux_text,
+        all(name in smoke_windows_text for name in python_test_files),
+        "smoke_windows.ps1 missing Python structural/media tests",
+    )
+    check(
+        all(name in smoke_linux_text for name in python_test_files),
         "smoke_linux.sh missing Python structural/media tests",
     )
     check(
-        "test_docs.py" in smoke_macos_text and "test_media_pipeline.py" in smoke_macos_text,
+        all(name in smoke_macos_text for name in python_test_files),
         "smoke_macos.sh missing Python structural/media tests",
     )
     check(
@@ -966,6 +1023,10 @@ def main() -> int:
         return 1
     print(f"Doc audit OK ({CHECKS} checks).")
     return 0
+
+
+def test_main_passes() -> None:
+    assert main() == 0
 
 
 if __name__ == "__main__":

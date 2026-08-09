@@ -22,6 +22,7 @@ from typing import Any
 from media_session import MediaSession
 from proxy_pool import ProxyPool
 from security_detector import detect_security_mechanisms
+from smart_fetch import create_fetch_session
 
 DEFAULT_TIMEOUT = 20.0
 
@@ -314,6 +315,8 @@ class ApiClient:
         backoff_max: float = 30.0,
         timeout: float = DEFAULT_TIMEOUT,
         cookies: list[dict[str, Any]] | None = None,
+        backend: str = "standard",
+        auto_install: bool | None = None,
     ) -> None:
         self.headers = dict(headers or {})
         self.proxy = proxy
@@ -324,12 +327,15 @@ class ApiClient:
         self.backoff_base = backoff_base
         self.backoff_max = backoff_max
         self.timeout = timeout
+        self.backend = backend
+        self.auto_install = auto_install
         self.session = self._new_session()
         if cookies:
             self.add_cookies(cookies)
 
     def _new_session(self) -> MediaSession:
-        return MediaSession(
+        return create_fetch_session(
+            {"backend": self.backend, "auto_install": self.auto_install},
             headers=dict(self.headers),
             proxy=self.proxy,
             proxy_pool=self.proxy_pool,
@@ -338,11 +344,16 @@ class ApiClient:
             max_retries=self.max_retries,
             backoff_base=self.backoff_base,
             backoff_max=self.backoff_max,
+            timeout=self.timeout,
         )
 
     def add_cookies(self, cookies: list[dict[str, Any]]) -> None:
         """Import Playwright-style cookies into the API session."""
         self.session.load_cookies(cookies)
+
+    def close(self) -> None:
+        """Release optional smart-fetch transports (standard session is a no-op)."""
+        self.session.close()
 
     def _fetch_one(
         self,
@@ -500,7 +511,7 @@ class ApiClient:
             data, pages, meta = self._fetch_with_pages(spec, timeout=timeout)
             security = None
             error = None
-            if meta is not None and meta.status is not None and meta.status >= 400:
+            if meta is not None and meta.status is not None:
                 body_text = (
                     data
                     if isinstance(data, str)
@@ -513,11 +524,14 @@ class ApiClient:
                     spec.url,
                     meta.headers or {},
                     body_text,
+                    html=body_text,
+                    page_url=spec.url,
                 )
-                security = report.to_dict()
                 if report.is_blocked:
+                    security = report.to_dict()
                     error = f"blocked by {report.primary_kind}"
-                else:
+                elif meta.status >= 400:
+                    security = report.to_dict()
                     error = f"HTTP {meta.status}"
             return ApiFetchResult(
                 spec=spec,
@@ -567,8 +581,13 @@ class ApiClient:
                 backoff_max=self.backoff_max,
                 timeout=self.timeout,
                 cookies=cookies,
+                backend=self.backend,
+                auto_install=self.auto_install,
             )
-            return client._fetch_result(spec)
+            try:
+                return client._fetch_result(spec)
+            finally:
+                client.close()
 
         with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
             results = list(pool.map(worker, specs))
@@ -684,6 +703,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-interval", type=float, default=0.0)
     parser.add_argument("--max-retries", type=int, default=0)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument(
+        "--backend",
+        default="standard",
+        help="standard or auto (curl_cffi -> cloudscraper -> httpx -> urllib)",
+    )
+    parser.add_argument(
+        "--auto-install",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="auto-install missing optional web-fetch packages (default: auto mode installs)",
+    )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -709,6 +739,8 @@ def main(argv: list[str] | None = None) -> int:
         proxy=args.proxy,
         min_interval=args.min_interval,
         max_retries=args.max_retries,
+        backend=args.backend,
+        auto_install=args.auto_install,
     )
     results = client.fetch_all(specs, concurrency=args.concurrency)
     if args.output:

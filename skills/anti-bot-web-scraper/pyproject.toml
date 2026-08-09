@@ -1,0 +1,59 @@
+[project]
+name = "anti-bot-web-scraper"
+version = "1.0.0"
+description = "Multi-backend web scraper with Cloudflare/Turnstile bypass."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# No runtime deps -- optional packages are installed by ensure_web_fetch_dependencies.py.
+
+[project.optional-dependencies]
+http = [
+    "curl_cffi",
+    "tls-client",
+    "cloudscraper",
+    "httpx",
+    "h2",
+]
+browser = [
+    "patchright",
+    "camoufox",
+    "scrapling",
+    "nodriver",
+    "seleniumbase",
+    "undetected-chromedriver",
+    "webdriver-manager",
+    "selenium-stealth",
+    "DrissionPage",
+    "selenium",
+]
+media = ["cryptography"]
+all = ["anti-bot-web-scraper[http,browser,media]"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "build",
+    "dist",
+    "**/__pycache__",
+    ".venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "UP",
+    "SIM",
+]
+ignore = [
+    "E501",
+    "B008",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

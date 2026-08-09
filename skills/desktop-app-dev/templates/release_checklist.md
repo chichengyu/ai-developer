@@ -22,6 +22,8 @@ issue and tick each one.
 
 - [ ] Windows 11 sandbox / VM with **no** developer tools installed:
   - [ ] EXE double-click launches the main window.
+  - [ ] EXE shows a startup animation + progress bar before the main
+    window appears; no blank/frozen window during startup.
   - [ ] No .NET runtime install dialog appears (self-contained or NativeAOT).
   - [ ] No missing-DLL error on first run.
   - [ ] Idle memory is measured (Task Manager: `<AppName>.exe`) and meets the Step 0 memory budget.
@@ -46,10 +48,17 @@ issue and tick each one.
   in requirements.md.
 - [ ] Settings persistence survives an uninstall + reinstall cycle.
 - [ ] Built-in dependency center (UI-19) verified on a clean machine:
-  click `安装依赖`, the app automatically downloads / installs /
-  configures Playwright + Chromium + ffmpeg / ffprobe + pycryptodome
-  into its app-local runtime with live bytes / speed / ETA, no manual
-  input, and the app restarts with the runtime available.
+  the dependency center menu lists every runtime dependency from the
+  manifest; click `安装依赖`, and the app automatically downloads /
+  installs / configures each one with chunked, resumable download and
+  live bytes / speed / ETA. No manual input beyond the single click, and
+  the app restarts with the runtime available.
+- [ ] Dependency center shows explanation text plus per-dependency manual
+  download / install instructions (download URL, target path, restart
+  steps) for users who prefer manual installation.
+- [ ] Dependency center shows each dependency's official website URL as a
+  clickable link and opens the page in the system default external browser
+  when clicked.
 - [ ] Auto-update: install v1.0.0, then publish v1.0.1 to the feed, the
   app must detect and offer the update without manual intervention.
 - [ ] Clean uninstall: no orphan files in `%APPDATA%` / `~/Library` /

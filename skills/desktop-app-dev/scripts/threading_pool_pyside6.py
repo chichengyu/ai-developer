@@ -11,6 +11,7 @@ Usage:
     pool.item_failed.connect(on_item_failed)
     pool.start(urls)
     # later: pool.cancel()
+    # on window close: pool.shutdown(3000)
 """
 
 from __future__ import annotations
@@ -110,7 +111,6 @@ class _PoolRunnable(QRunnable):
         signals: _PoolSignals,
     ) -> None:
         super().__init__()
-        self.setAutoDelete(False)
         self._index = index
         self._payload = payload
         self._job = job
@@ -228,6 +228,14 @@ class PySide6WorkerPool(QObject, Generic[T]):
 
     def is_running(self) -> bool:
         return bool(self._runnables)
+
+    def shutdown(self, timeout_ms: int = 3000) -> bool:
+        """Cancel pending work and wait for the pool with a bounded timeout."""
+        self.cancel()
+        waited = self._thread_pool.waitForDone(max(1, int(timeout_ms)))
+        if waited:
+            self._runnables.clear()
+        return waited and self._thread_pool.activeThreadCount() == 0
 
     @Slot(object)
     def _on_item_done(self, item: PoolItem[T]) -> None:

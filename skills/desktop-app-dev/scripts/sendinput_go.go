@@ -56,7 +56,7 @@ func buildVkMap() map[string]uint16 {
 		m[string(c)] = uint16(0x30 + i)
 	}
 	for i := 1; i <= 24; i++ {
-		m["f"+itoa(i)] = uint16(0x6F + i - 1)
+		m["f"+itoa(i)] = uint16(0x70 + i - 1)
 	}
 	for i := 0; i < 10; i++ {
 		m["num"+itoa(i)] = uint16(0x60 + i)

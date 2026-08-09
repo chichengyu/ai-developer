@@ -36,7 +36,7 @@ public static class SendInput
         var map = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase);
         for (char c = 'A'; c <= 'Z'; c++) map[c.ToString()] = (ushort)(0x41 + (c - 'A'));
         for (char c = '0'; c <= '9'; c++) map[c.ToString()] = (ushort)(0x30 + (c - '0'));
-        for (int i = 1; i <= 24; i++) map["F" + i] = (ushort)(0x6F + i - 1);
+        for (int i = 1; i <= 24; i++) map["F" + i] = (ushort)(0x70 + i - 1);
         for (int i = 0; i < 10; i++) map["NUM" + i] = (ushort)(0x60 + i);
         map["BACK"] = 0x08; map["TAB"] = 0x09; map["ENTER"] = 0x0D;
         map["ESCAPE"] = 0x1B; map["ESC"] = 0x1B; map["SPACE"] = 0x20;

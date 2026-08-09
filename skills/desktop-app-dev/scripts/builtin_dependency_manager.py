@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -20,7 +21,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,8 @@ class DependencySpec:
     extract_subdir: str | None = None
     download_name: str | None = None
     note: str = ""
+    pip_target: str | None = None
+    module_name: str | None = None
 
 
 def spec_from_dict(data: dict[str, Any]) -> DependencySpec:
@@ -61,6 +64,8 @@ def spec_from_dict(data: dict[str, Any]) -> DependencySpec:
         extract_subdir=data.get("extract_subdir"),
         download_name=data.get("download_name"),
         note=str(data.get("note", "") or ""),
+        pip_target=data.get("pip_target"),
+        module_name=data.get("module_name"),
     )
 
 
@@ -87,7 +92,7 @@ class BuiltinDependencyManager:
     def __init__(
         self,
         runtime_dir: str | Path,
-        specs: list[DependencySpec | dict[str, Any]] | None = None,
+        specs: Sequence[DependencySpec | dict[str, Any]] | None = None,
         progress: ProgressFn | None = None,
     ) -> None:
         self.runtime_dir = Path(runtime_dir)
@@ -140,6 +145,36 @@ class BuiltinDependencyManager:
     def _status_for(self, spec: DependencySpec) -> dict[str, Any]:
         install_dir = self.runtime_dir / spec.name
         found: list[str] = []
+        if spec.kind == "pip":
+            module_name = spec.module_name or (spec.url or "").replace("-", "_")
+            target = Path(spec.pip_target) if spec.pip_target else None
+            if target is not None and (target / module_name).exists():
+                return {
+                    "name": spec.name,
+                    "kind": spec.kind,
+                    "installed": True,
+                    "version": self._read_version(install_dir) or spec.version,
+                    "paths": [str(target / module_name)],
+                    "bin_dir": str(target),
+                }
+            module_spec = importlib.util.find_spec(module_name)
+            if module_spec is not None:
+                return {
+                    "name": spec.name,
+                    "kind": spec.kind,
+                    "installed": True,
+                    "version": self._read_version(install_dir) or spec.version,
+                    "paths": [str(module_spec.origin or "")],
+                    "bin_dir": str(target or ""),
+                }
+            return {
+                "name": spec.name,
+                "kind": spec.kind,
+                "installed": False,
+                "version": spec.version,
+                "paths": [],
+                "bin_dir": str(target or ""),
+            }
         for name in spec.bin_names:
             found_path = self._find_bin(install_dir, name)
             if found_path is None and spec.kind == "detect":
@@ -161,7 +196,7 @@ class BuiltinDependencyManager:
 
     def _install_one(self, spec: DependencySpec) -> None:
         status = self._status_for(spec)
-        if status["installed"] and spec.kind in ("detect", "archive", "portable"):
+        if status["installed"] and spec.kind in ("detect", "archive", "portable", "pip"):
             self.progress(spec.name, 1.0, f"{spec.name} already installed")
             return
         if spec.kind == "pip":
@@ -237,15 +272,40 @@ class BuiltinDependencyManager:
     def _install_pip(self, spec: DependencySpec) -> None:
         if spec.url is None:
             raise DependencyError(f"{spec.name} has no pip package name")
+        if getattr(sys, "frozen", False):
+            raise DependencyError(
+                f"{spec.name} is not bundled in this EXE. Rebuild with "
+                "build_python.ps1 -InstallDeps after adding it to requirements.txt."
+            )
         self.progress(spec.name, 0.2, f"installing pip package {spec.url}")
+        command = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-input",
+            "--upgrade",
+            spec.url,
+        ]
+        if spec.pip_target:
+            target = Path(spec.pip_target)
+            target.mkdir(parents=True, exist_ok=True)
+            command += ["--target", str(target)]
+            self.progress(spec.name, 0.35, f"installing into {target}")
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--upgrade", spec.url],
+            command,
             capture_output=True,
             text=True,
             check=False,
         )
         if result.returncode != 0:
             raise DependencyError(f"pip install {spec.url} failed: {result.stderr[-500:]}")
+        status = self._status_for(spec)
+        if not status["installed"]:
+            raise DependencyError(
+                f"pip install {spec.url} completed but {spec.name} is still missing"
+            )
         self.progress(spec.name, 1.0, f"pip package {spec.url} installed")
 
     @staticmethod

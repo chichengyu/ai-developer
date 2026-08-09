@@ -1,6 +1,6 @@
 # examples/
 
-Nine minimal runnable projects that demonstrate the skill's templates in
+Ten minimal runnable projects that demonstrate the skill's templates in
 real (non-toy) contexts. They either consume the canonical scripts in
 `../scripts/` by file link (`<Compile Include>` in .NET) or runtime
 `sys.path` injection (Python), or demonstrate a standalone packaging path.
@@ -11,6 +11,7 @@ real (non-toy) contexts. They either consume the canonical scripts in
 | `winui3-threading/`   | C# / WinUI 3 | `threading_winui.cs` + DispatcherQueue |
 | `tkinter-threading/`  | Python 3.12  | `threading_tkinter.py` + SendInput     |
 | `pyside6-threading/`  | Python 3.12  | `threading_pyside6.py` (QThread+Signal)|
+| `pyside6-management/` | Python 3.12  | `.ui` + left nav + loading + lazy deps + clean exit |
 | `tauri-threading/`    | Rust + Web   | `threading_tauri.rs` + window.emit     |
 | `msix-packaging/`     | C# / WPF + Windows App SDK | MSIX packaging pipeline |
 | `nativeaot-winforms/` | C# / WinForms + NativeAOT | single-file NativeAOT EXE |
@@ -21,6 +22,10 @@ For independent batch jobs, swap in the matching
 `scripts/threading_pool_*` template (Python / C# / Tauri / Compose /
 Electron) so the example gets aggregate progress, retry, and one
 `cancel()`.
+
+The two PySide6 examples are Python-only. Other languages do not install
+PySide6 or use `lazy_python_dependency.py`; use their native UI files and
+package managers instead.
 
 ## Why file-link / sys.path injection?
 
@@ -37,6 +42,9 @@ python examples/tkinter-threading/app.py
 # pyside6 (requires pip install PySide6)
 pip install PySide6
 python examples/pyside6-threading/app.py
+
+# pyside6 management shell (.ui + loading + lazy deps + clean shutdown)
+python examples/pyside6-management/app.py
 
 # WPF (requires .NET 8 SDK)
 cd examples/wpf-threading && dotnet run

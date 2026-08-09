@@ -4,8 +4,8 @@
 #
 # Tests:
 #   1. PowerShell parse (AST) on every .ps1 in the skill.
-#   2. Python module imports for sendinput_python.py and
-#      window_enum_python.py (smoke checks the import path).
+#   2. Python module imports for sendinput_python.py,
+#      window_enum_python.py, and the accessibility wrappers.
 #   3. JSON / XML / TOML fixture validity.
 #   4. tests/test_arch_awareness.ps1 (the 14-script -Arch / -Rid check).
 #   5. Python AST parse for all .py in scripts/.
@@ -43,6 +43,21 @@ function Run-Test {
     }
 }
 
+function Test-Import {
+    param([string] $FileName)
+    $script = @"
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location('mod', r'$scriptsDir\$FileName')
+m = importlib.util.module_from_spec(spec)
+sys.modules['mod'] = m
+spec.loader.exec_module(m)
+print('OK')
+"@
+    & $py -c $script 2>&1 | Out-Null
+    $LASTEXITCODE -eq 0
+}
+
 Write-Host "=== smoke_windows.ps1 ==="
 Write-Host "Skill root: $root"
 Write-Host ""
@@ -71,20 +86,17 @@ if ($py) {
         & $py "$scriptsDir\sendinput_python.py" 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
     }
-    Run-Test "window_enum_python.py imports" {
-        $script = @"
-import importlib.util
-spec = importlib.util.spec_from_file_location('we', r'$scriptsDir\window_enum_python.py')
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-print('OK')
-"@
-        & $py -c $script 2>&1 | Out-Null
-        $LASTEXITCODE -eq 0
-    }
+    Run-Test "window_enum_python.py imports" { Test-Import "window_enum_python.py" }
+    Run-Test "accessibility_uia.py imports" { Test-Import "accessibility_uia.py" }
+    Run-Test "accessibility_msaa.py imports" { Test-Import "accessibility_msaa.py" }
     Run-Test "select_framework.py --self-test" {
         & $py "$scriptsDir\select_framework.py" --self-test 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
+    }
+    Run-Test "select_framework.py --language python" {
+        $out = & $py "$scriptsDir\select_framework.py" --language python --top 2 2>&1
+        $text = $out -join "`n"
+        $LASTEXITCODE -eq 0 -and $text -match "PySide6" -and $text -match "tkinter"
     }
     Run-Test "check_vk_tables.py" {
         & $py "$scriptsDir\check_vk_tables.py" 2>&1 | Out-Null
@@ -112,6 +124,18 @@ print('OK')
     }
     Run-Test "test_threading_concurrency.py" {
         & $py "$root\tests\test_threading_concurrency.py" 2>&1 | Out-Null
+        $LASTEXITCODE -eq 0
+    }
+    Run-Test "test_pyside6_management.py" {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & $py "$root\tests\test_pyside6_management.py" 2>&1 | Out-Null
+        $code = $LASTEXITCODE
+        $ErrorActionPreference = $previous
+        $code -eq 0
+    }
+    Run-Test "test_dependency_center.py" {
+        & $py "$root\tests\test_dependency_center.py" 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
     }
     Run-Test "game-automation example imports" {

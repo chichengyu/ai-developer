@@ -48,7 +48,7 @@ public final class SendInput {
         Map<String, Integer> m = new HashMap<>();
         for (int i = 0; i < 26; i++) m.put(String.valueOf((char) ('a' + i)), 0x41 + i);
         for (int i = 0; i < 10; i++) m.put(String.valueOf((char) ('0' + i)), 0x30 + i);
-        for (int i = 1; i <= 24; i++) m.put("f" + i, 0x6F + i - 1);
+        for (int i = 1; i <= 24; i++) m.put("f" + i, 0x70 + i - 1);
         for (int i = 0; i < 10; i++) m.put("num" + i, 0x60 + i);
         Map<String, Integer> extras = new HashMap<>();
         extras.put("back", 0x08); extras.put("tab", 0x09); extras.put("enter", 0x0D);

@@ -10,6 +10,8 @@ across Windows / macOS / Ubuntu.
 | `test_no_bom.py`             | any         | BOM / U+FEFF regression scan across text files |
 | `test_threading_templates.py`| any         | every threading template has cancel/progress/error and a UI bridge |
 | `test_threading_concurrency.py`| any       | runtime checks for the shared bounded worker pool (retry, cancel, progress) |
+| `test_pyside6_management.py`  | any       | PySide6 example structure + optional offscreen launch/shutdown test |
+| `test_dependency_center.py`   | any       | dependency manifest list + one-click chunked install regression |
 | `smoke_macos.sh`             | macOS       | bash syntax + all .ps1 parse + Python + Swift -parse + doc/media tests|
 | `smoke_linux.sh`             | Linux       | bash syntax + all .ps1 parse + Python AST + doc/media tests|
 | `test_arch_awareness.ps1`    | Windows*    | Verifies every `build_*.ps1` has `-Arch` / `-Rid`        |
@@ -28,7 +30,7 @@ cd tests
 .\smoke_windows.ps1
 ```
 
-Expected output: `Passed: 123   Failed: 0` (varies slightly as scripts
+Expected output: `Passed: 138   Failed: 0` (varies slightly as scripts
 are added).
 
 ### macOS

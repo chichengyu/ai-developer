@@ -5,6 +5,46 @@ picks the *language* (Python, C#, Rust, etc.), pick the *UI toolkit* inside
 that language. The matrix in `references/framework_matrix.md` covers
 language choice. This document covers toolkit choice.
 
+Do not silently default to the language's native UI framework. First run:
+
+```powershell
+python scripts/select_framework.py --language python
+python scripts/select_framework.py --language csharp
+```
+
+The selector lists the recommended best overall first, then alternatives
+with pros / cons / performance. The user makes the final call.
+
+## Language-first candidate list
+
+| Language | UI framework | Best for | Cons | Performance |
+|---|---|---|---|---|
+| Python | **PySide6** | modern widgets, grids, charts | larger EXE, slower cold start | cold ~0.6s; EXE ~70-180MB |
+| Python | tkinter | zero-install tools, fastest prototype | dated look, weak 100k-row grids | cold ~0.3s; EXE ~10-40MB |
+| Python | PyGObject | native GNOME/Adwaita on Linux | Windows/macOS packaging fragile | cold ~0.5s; EXE ~60MB+ |
+| C# | **WPF** | Windows LOB, MVVM, Win32 interop | Windows-only | cold ~0.5s; EXE ~70MB |
+| C# | WinUI 3 | Windows 11 Fluent, Store | Win10 1809+, MSIX friction | cold ~0.4s |
+| C# | Avalonia | cross-platform XAML | smaller ecosystem | cold ~0.5s; EXE ~50MB |
+| C# | WinForms | fastest .NET tool UI, NativeAOT | dated look, weaker grids | cold ~0.4s; EXE ~5MB |
+| C# | MAUI | one codebase incl. mobile | desktop maturity behind WPF | cold ~0.5s; EXE ~80MB |
+| Rust | **Tauri** | tiny EXE, web frontend | needs Rust + WebView2 story | cold ~0.2s; EXE ~5-10MB |
+| Rust | Slint | true native widgets, tiny EXE | smaller ecosystem | cold ~0.2s; EXE ~3MB |
+| Rust | egui | immediate-mode tools/debug UI | distinctive look | cold ~0.2s; EXE ~3-8MB |
+| Go | **Wails** | Go backend + web frontend | WebView2 story, npm needed | cold ~0.3s; EXE ~5-15MB |
+| Go | Fyne | pure-Go native widgets | custom look | cold ~0.3s; EXE ~10-20MB |
+| Go | Gio | GPU immediate-mode | lower-level | cold ~0.2s; EXE ~5-15MB |
+| Go | walk | Windows-only Win32 | Windows-only | cold ~0.2s; EXE ~5-10MB |
+| C++ | **Qt 6** | cross-platform + deep OS access | GPL/paid license, large | cold ~0.2-0.4s; EXE ~20MB static |
+| C++ | Win32/MFC | smallest EXE, ActiveX/OLE | boilerplate, Windows-only | cold ~0.1s; EXE ~0.5-3MB |
+| TypeScript/JS | **Tauri** | tiny EXE, web UI | needs Rust backend | cold ~0.2s; EXE ~5-10MB |
+| TypeScript/JS | Electron | huge ecosystem, JS-only | 150MB, 1-2s cold start | cold ~1.5s; EXE ~80-150MB |
+| TypeScript/JS | Neutralino | tiny EXE, no Chromium | smaller ecosystem | cold ~0.3s; EXE ~2-5MB |
+| Kotlin | **Compose Multiplatform** | modern declarative UI, mobile parity | desktop still maturing | cold ~0.6s; EXE ~80-150MB |
+| Kotlin | TornadoFX | Kotlin DSL on JavaFX | JVM/JRE, less active | cold ~1s; EXE ~50-100MB |
+| Java | **JavaFX** | mature JVM desktop, charts | JRE/jpackage, cold start | cold ~1s; EXE ~50-100MB |
+| Swift | **SwiftUI** | Apple-first native | Windows second-class | cold ~0.2s; EXE ~5-15MB |
+| Dart | **Flutter** | desktop + mobile + web parity | desktop APIs less mature | cold ~0.4s; EXE ~40-80MB |
+
 ---
 
 ## Python

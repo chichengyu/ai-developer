@@ -1,7 +1,9 @@
 """Runtime dependency manager for the media acquisition pipeline.
 
 Checks and installs:
-- Python packages: playwright, pycryptodome, pillow, pytesseract (OCR)
+- Python packages: playwright, pycryptodome, pillow, pytesseract (OCR),
+  curl_cffi, cloudscraper, httpx, h2, patchright, nodriver, DrissionPage
+  (optional web-fetch / stealth-browser stack)
 - Chromium browser via `playwright install chromium`
 - Portable ffmpeg / ffprobe for Windows
 
@@ -36,6 +38,15 @@ FFMPEG_WINDOWS_URL = os.environ.get(
     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
 )
 PYTHON_PACKAGES = ["playwright", "pycryptodome", "pillow", "pytesseract"]
+WEB_FETCH_PACKAGES = [
+    "curl_cffi",
+    "cloudscraper",
+    "httpx",
+    "h2",
+    "patchright",
+    "nodriver",
+    "DrissionPage",
+]
 
 
 def _noop_progress(stage: str, percent: float | None, message: str) -> None:
@@ -51,6 +62,13 @@ def check_status(runtime_dir: str | Path | None = None) -> dict:
     ffprobe = bool(shutil.which("ffprobe") or (bin_dir / ffprobe_name).exists())
     playwright_installed = importlib.util.find_spec("playwright") is not None
     pycryptodome_installed = importlib.util.find_spec("Crypto") is not None
+    curl_cffi_installed = importlib.util.find_spec("curl_cffi") is not None
+    cloudscraper_installed = importlib.util.find_spec("cloudscraper") is not None
+    httpx_installed = importlib.util.find_spec("httpx") is not None
+    h2_installed = importlib.util.find_spec("h2") is not None
+    patchright_installed = importlib.util.find_spec("patchright") is not None
+    nodriver_installed = importlib.util.find_spec("nodriver") is not None
+    drission_installed = importlib.util.find_spec("DrissionPage") is not None
     ocr_installed = (
         importlib.util.find_spec("PIL") is not None
         and importlib.util.find_spec("pytesseract") is not None
@@ -60,6 +78,13 @@ def check_status(runtime_dir: str | Path | None = None) -> dict:
     return {
         "playwright": playwright_installed,
         "pycryptodome": pycryptodome_installed,
+        "curl_cffi": curl_cffi_installed,
+        "cloudscraper": cloudscraper_installed,
+        "httpx": httpx_installed,
+        "h2": h2_installed,
+        "patchright": patchright_installed,
+        "nodriver": nodriver_installed,
+        "drission_page": drission_installed,
         "ocr": ocr_installed,
         "chromium": playwright_installed and chromium_browser,
         "ffmpeg": bool(ffmpeg),
@@ -105,12 +130,25 @@ def install_dependencies(
     report = progress or _noop_progress
     if not install:
         return check_status(runtime_dir)
+    if getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "Media runtime dependencies are not bundled in this EXE. Rebuild with "
+            "build_python.ps1 -InstallDeps or install through the dependency center."
+        )
 
     runtime = Path(runtime_dir) if runtime_dir else DEFAULT_RUNTIME_DIR
     runtime.mkdir(parents=True, exist_ok=True)
     report("packages", 0.1, "installing playwright + pycryptodome + OCR packages")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", *PYTHON_PACKAGES],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            *PYTHON_PACKAGES,
+            *WEB_FETCH_PACKAGES,
+        ],
         capture_output=True,
         text=True,
         check=False,

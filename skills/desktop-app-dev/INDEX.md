@@ -85,7 +85,7 @@ ready templates: `media_session.py`, `media_downloader.py`,
 - Packaging: `build_python.ps1`, `build_dotnet.ps1`, `build_electron.ps1`,
   `build_qt.ps1`, plus MSI / NSIS / MSIX / Velopack / Squirrel / WinSparkle.
 - DPI: `templates/dpi_manifest.xml` (Per-monitor V2).
-- Examples: `examples/{wpf,winui3,tkinter,pyside6,tauri,msix-packaging,nativeaot-winforms,game-automation,media-toolkit}/`.
+- Examples: `examples/{wpf,winui3,tkinter,pyside6,pyside6-management,tauri,msix-packaging,nativeaot-winforms,game-automation,media-toolkit}/`.
 
 ### macOS (11 Big Sur+, Apple Silicon preferred)
 
@@ -116,7 +116,9 @@ ready templates: `media_session.py`, `media_downloader.py`,
 ## By framework (after language choice)
 
 See `references/framework_matrix.md` for the canonical pros/cons. Once
-you have picked one:
+the language is chosen, run `python scripts/select_framework.py
+--language <lang>` first: it lists the recommended best UI framework plus
+alternatives with pros/cons and performance. Then pick one:
 
 | Framework / tool     | Build script              | Threading template           | Example project |
 |----------------------|---------------------------|-------------------------------|-----------------|
@@ -126,7 +128,7 @@ you have picked one:
 | Avalonia             | `scripts/build_dotnet.ps1` | `scripts/threading_avalonia.cs` | -- |
 | .NET MAUI            | `scripts/build_dotnet.ps1` | `scripts/threading_maui.cs`    | -- |
 | Python tkinter       | `scripts/build_python.ps1` | `scripts/threading_tkinter.py` | `examples/tkinter-threading/` |
-| Python PySide6       | `scripts/build_python.ps1` | `scripts/threading_pyside6.py` | `examples/pyside6-threading/` |
+| Python PySide6       | `scripts/build_python.ps1` | `scripts/threading_pyside6.py` | `examples/pyside6-threading/` / `pyside6-management/` |
 | Python GTK           | `scripts/build_python.ps1` | `scripts/threading_glib.py`   | -- |
 | Tauri (Rust + Web)   | `scripts/build_tauri.ps1` | `scripts/threading_tauri.rs`   | `examples/tauri-threading/` |
 | Electron             | `scripts/build_electron.ps1` | `scripts/threading_electron.ts` + worker | -- |
@@ -164,13 +166,25 @@ Use `-DryRun` first, then `-Install` to install via winget / pip. The
 framework-to-toolchain mapping is in `scripts/toolchain_map.json`.
 Build helpers never auto-install; helpers with a safe installer accept
 the same `-Install` opt-in, and the rest fail with the exact install
-command.
+command. For a per-language UI framework shortlist, run
+`python scripts/select_framework.py --language python` (replace the
+language) and let the user choose from the listed pros/cons/performance.
 
 ### I need UI / theme consistency
 
 Open `references/ui_hard_requirements.md` -- canonical UI-01..UI-19
 checklist, Codex-like default palette, semantic colors, theme library
 URLs, settings persistence, log center, and auto-refresh rules.
+
+### I need a PySide6 .ui shell with loading, lazy deps, and clean exit (Python only)
+
+Use `examples/pyside6-management/` only for Python projects: left nav +
+one table per page, `QUiLoader` loading of `app.ui`, button/table loading
+states, first-use dependency checks/installs via
+`scripts/lazy_python_dependency.py`, and `JobRegistry.shutdown_all()`
+plus `QThreadPool.waitForDone()` on close. Package with
+`scripts/build_python.ps1 -FastStart -InstallDeps`.
+Other languages use their own UI stack and do not install PySide6.
 
 ### I need a heavy desktop / data-dense app
 
@@ -214,9 +228,15 @@ and use `clients/` wrappers or `references/media_pipeline_clients.md`
 to call it over HTTP.
 Install the runtime with the app's built-in dependency center (UI-19):
 the user clicks `安装依赖`, and the app calls `POST /deps/install` or
-uses `scripts/builtin_dependency_manager.py` to download / install /
-configure app-local binaries automatically. The CLI equivalent is
-`scripts/setup_media_dependencies.ps1 -Install`.
+uses `scripts/dependency_center.py` (manifest-driven menu) /
+`scripts/builtin_dependency_manager.py` to download / install / configure
+app-local binaries automatically with chunked, resumable downloads. The
+CLI equivalent is `scripts/setup_media_dependencies.ps1 -Install`.
+For a single all-in-one command, `scripts/ensure_all_dependencies.py
+--install` checks and installs the web-fetch stack, media runtime, and an
+optional `--manifest dependencies.json` in one pass.
+Optional Python packages use `scripts/lazy_python_dependency.py`: checked
+and installed only when the feature is first used, never at startup.
 Live UI progress comes from `GET /tasks/<id>/progress` and
 `GET /tasks/<id>/events?after=N&timeout=0..30` (long-poll); snapshots
 include total file size, downloaded/output bytes, percent, speed, ETA, and
@@ -240,7 +260,17 @@ Cloudflare / WAF / rate-limit / CAPTCHA / login / geo blocks and picks a
 non-interactive action; `scripts/deep_crawler.py` recursively discovers
 pages via links and sitemaps with robots and rate-limit protection. The
 sidecar accepts `kind: "webdata"` tasks for any desktop UI language and
-exposes per-task progress/events.
+exposes per-task progress/events. For Cloudflare / WAF-heavy targets, enable
+`"fetch": {"backend": "auto"}` and `scripts/smart_fetch.py` automatically
+switches between `curl_cffi`, `cloudscraper`, `httpx`, and the standard
+fallback while reusing `cf_clearance` / `__cf_bm`, the user agent, and the
+pinned proxy. Auto mode defaults to `"auto_install": true`, so
+`scripts/ensure_web_fetch_dependencies.py` downloads missing optional
+packages on first use; set `"auto_install": false` to disable, or run the
+script directly for a one-shot check/install.
+For Managed Challenges / Turnstile, use `scripts/flaresolverr.py` (local
+FlareSolverr service) or `scripts/stealth_browser.py` (Patchright / nodriver
+/ DrissionPage); `BrowserSession` also accepts `engine: "patchright"`.
 
 ### I need deep crawling / automatic anti-bot handling
 
@@ -255,7 +285,9 @@ automatic handling with a `security` section
 managed challenges / Turnstile, add a `cloudflare` section backed by
 `scripts/cloudflare_challenge.py`: it waits for `cf_clearance`, clicks the
 widget, injects a third-party token when configured, and reuses the cleared
-UA + proxy for API calls.
+UA + proxy for API calls. The handler also tracks `__cf_bm`, clearance
+expiry, and Cloudflare response headers (`cf-ray`, `cf-mitigated`,
+`cf-cache-status`, optional bot-score headers).
 
 ### I need a tiny single-file EXE
 
@@ -275,6 +307,7 @@ RAM is a hard budget.
 | Target            | Script                          |
 |-------------------|----------------------------------|
 | Windows single-file EXE   | `scripts/build_python.ps1`     |
+| Windows fast-start PySide6 | `scripts/build_python.ps1 -FastStart -InstallDeps` |
 | Windows .NET single-file  | `scripts/build_dotnet.ps1`     |
 | Windows NativeAOT single-file | `scripts/build_dotnet_nativeaot.ps1` |
 | Windows installer (NSIS/MSI) | `scripts/build_electron.ps1`, `build_tauri.ps1` |
@@ -394,8 +427,8 @@ I want to convert audio / video / images / documents / archives
         (or enqueue convert / batch-convert tasks through the sidecar)
 
 I want app-local one-click dependency install
-    --> scripts/builtin_dependency_manager.py + UI-19
-        (user clicks install; app downloads/configures into its runtime)
+    --> scripts/dependency_center.py + builtin_dependency_manager.py + UI-19
+        (app lists all deps in a menu; user clicks install; chunked download/configure)
 
 I want to package as EXE / .app / .AppImage
     --> scripts/build_<your-target>.ps1 (or .sh)

@@ -14,6 +14,16 @@ together the existing skill templates:
   scores, data paths, and inferred pagination
 - `scripts/api_client.py` - build replayable API specs from a capture and
   fetch data through the rate-limited `MediaSession`
+- `scripts/smart_fetch.py` - optional adaptive transport layer that
+  auto-switches between `curl_cffi` (TLS/JA3/JA4 impersonation),
+  `cloudscraper` (Cloudflare JS / Turnstile), `httpx` (HTTP/2), and the
+  standard-library fallback
+- `scripts/ensure_web_fetch_dependencies.py` - check-only or automatic
+  pip installer for the optional web-fetch packages
+- `scripts/flaresolverr.py` - standard-library client for a local
+  FlareSolverr service (browser-based Cloudflare / DDoS-Guard solving)
+- `scripts/stealth_browser.py` - deep browser solvers using Patchright,
+  nodriver, or DrissionPage
 - `scripts/data_processor.py` - declarative data shaping and aggregation
 - `scripts/web_data_pipeline.py` - one-config end-to-end orchestrator
 - `scripts/security_detector.py` - automatic identification of Cloudflare,
@@ -151,6 +161,8 @@ powershell -ExecutionPolicy Bypass -File scripts/setup_media_dependencies.ps1 -I
 
 `media_dependencies.py` checks for Pillow, pytesseract, and the system
 `tesseract` binary and reports them as the `ocr` status key.
+It also reports the optional web-fetch stack: `curl_cffi`, `cloudscraper`,
+`httpx`, and `h2`.
 
 Keep API keys encrypted in local config (Windows DPAPI / keyring), never in
 source or plaintext config. Do not claim the pipeline bypasses every
@@ -196,6 +208,100 @@ the fingerprint browser before they are discarded. API responses that end
 in 4xx / 5xx now keep their status, headers, and a security report instead
 of collapsing into a generic exception.
 
+### Adaptive fetch backends
+
+`scripts/smart_fetch.py` adds a `fetch` config section that automatically
+switches HTTP transports when the security detector sees a Cloudflare
+challenge / block, WAF block, rate limit, or CAPTCHA wall:
+
+```json
+{
+  "fetch": {
+    "backend": "auto",
+    "auto_install": true,
+    "order": ["curl_cffi", "cloudscraper", "httpx", "urllib"],
+    "impersonate": "chrome",
+    "cloudscraper": {
+      "delay": 5,
+      "browser": {"browser": "chrome", "platform": "windows", "mobile": false}
+    },
+    "flaresolverr": {
+      "base_url": "http://127.0.0.1:8191",
+      "max_timeout": 60000
+    }
+  }
+}
+```
+
+Backend priorities:
+
+- `curl_cffi` impersonates a real browser TLS stack (JA3 / JA4, HTTP/2,
+  header order) without launching a browser.
+- `cloudscraper` runs Cloudflare JS / Turnstile challenge solving through a
+  requests-compatible session.
+- `httpx` uses HTTP/2 connection pooling when `h2` is installed.
+- `flaresolverr` forwards the request to a local FlareSolverr instance when
+  configured; the returned `cf_clearance` / cookies are merged back into the
+  session before the next backend tries the URL.
+- `urllib` is the dependency-free fallback.
+
+In `auto` mode, `auto_install` defaults to `true`: `smart_fetch.py` calls
+`ensure_web_fetch_dependencies.py` on first use and downloads only the
+missing optional packages. Set `"auto_install": false` to disable that.
+To run it as a standalone one-shot command:
+
+```powershell
+python scripts/ensure_web_fetch_dependencies.py          # auto install
+python scripts/ensure_web_fetch_dependencies.py --check  # report only
+python scripts/ensure_web_fetch_dependencies.py --http-only  # skip stealth browsers
+```
+
+For the full runtime (Chromium, ffmpeg, pycryptodome, optional manifest
+dependencies), use `python scripts/ensure_all_dependencies.py --install`.
+
+The session keeps one user agent, proxy, and cookie jar across switches.
+Cloudflare official docs state that `cf_clearance` is tied to the visitor
+and device and that a challenge solve from a different IP than the original
+request is not valid, so the pipeline never rotates proxy or UA after a
+clearance is obtained. `cf_clearance` is time-bound (Challenge Passage,
+default 30 minutes), and `__cf_bm` is the Bot Management session cookie that
+smoothes the bot score; both are preserved and reused for later API calls.
+Sidecar `analyze`, `crawl`, and `webdata` tasks also honor `payload.fetch`
+when the caller supplies a `fetch` object.
+
+### Deep browser escalation
+
+For Managed Challenges / Turnstile that the HTTP layer cannot clear, the
+pipeline can use a stealth browser instead of plain Playwright:
+
+```json
+{
+  "browser": {
+    "engine": "patchright",
+    "stealth_engine": "nodriver",
+    "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "auto_install": true,
+    "headless": true,
+    "challenge_timeout": 60000
+  }
+}
+```
+
+- `engine: "patchright"` makes `BrowserSession` use the undetected Patchright
+  Playwright API instead of stock Playwright.
+- `stealth_engine: "nodriver"` or `"drission_page"` runs a lightweight
+  deep solver (`scripts/stealth_browser.py`) for blocked pages when the
+  browser is not already enabled.
+- `browser_path` points to an installed Chrome / Edge binary, and
+  `auto_install` (default true) installs a missing engine package before
+  the solver runs.
+- `scripts/flaresolverr.py` can also be used as a standalone service client
+  when a remote / Dockerized FlareSolverr is available.
+
+The solved cookies are merged into the API session, so subsequent requests
+keep the same `cf_clearance`, `__cf_bm`, user agent, and proxy that the
+challenge solver produced.
+
 ### Cloudflare high-intensity challenge handling
 
 `scripts/cloudflare_challenge.py` adds a dedicated high-intensity path on
@@ -212,6 +318,14 @@ stages: `js_challenge`, `managed_non_interactive`, `turnstile_captcha`, and
    `needs_new_session` so the pipeline can rotate proxy and retry in a
    fresh fingerprint browser.
 
+It also tracks official Cloudflare signals: valid vs. expired
+`cf_clearance`, `__cf_bm`, `Server: cloudflare`, `cf-mitigated`,
+`cf-cache-status`, `cf-ray`, and optional `cf-bot-score` / `x-bot-score`
+headers. Managed Challenges dynamically choose non-interactive or
+interactive Turnstile verification based on browser signals; when a
+high-intensity challenge cannot be cleared by the smart HTTP layer, the
+pipeline escalates to the fingerprint browser.
+
 Enable it with:
 
 ```json
@@ -225,18 +339,22 @@ Enable it with:
     "solve_turnstile": true,
     "reload_before_retry": true,
     "rotate_proxy_on_fail": true,
+    "reuse_clearance": true,
+    "pin_proxy": true,
+    "keep_bm_cookie": true,
+    "clearance_passage_seconds": 1800,
     "max_rotation_attempts": 1
   }
 }
 ```
 
-When the challenge passes, the pipeline keeps the `cf_clearance` cookie,
-the browser user agent, and the pinned proxy, and reuses all three for the
-subsequent API fetches so the clearance is not invalidated by a different
-IP / UA. When the handler repeatedly fails and `rotate_proxy_on_fail` is
-true, the pipeline closes the browser session, marks the proxy as failed,
-and retries the same URL in a fresh fingerprint browser with the next
-proxy, up to `max_rotation_attempts`.
+When the challenge passes, the pipeline keeps the `cf_clearance` and
+`__cf_bm` cookies, the browser user agent, and the pinned proxy, and reuses
+all of them for subsequent API fetches so the clearance is not invalidated
+by a different IP / UA / cookie state. When the handler repeatedly fails and
+`rotate_proxy_on_fail` is true, the pipeline closes the browser session,
+marks the proxy as failed, and retries the same URL in a fresh fingerprint
+browser with the next proxy, up to `max_rotation_attempts`.
 
 ## 6. Deep crawling
 
@@ -414,6 +532,7 @@ For any desktop UI language, run the sidecar and enqueue a task:
   "payload": {
     "config": {
       "pages": ["https://example.com/list"],
+      "fetch": {"backend": "auto", "auto_install": true},
       "api": {"min_interval": 0.5, "max_retries": 3},
       "processing": {"steps": [{"op": "select", "params": {"fields": ["id", "name"]}}]},
       "output": "out/result.json"

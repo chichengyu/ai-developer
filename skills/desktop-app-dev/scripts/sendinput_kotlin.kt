@@ -31,7 +31,7 @@ object SendInput {
         // digits
         *((0x30..0x39).map { ('0' + (it - 0x30)) to it }.toTypedArray()),
         // function keys F1-F24
-        *(1..24).map { "f$it" to (0x6F + it - 1) }.toTypedArray(),
+        *(1..24).map { "f$it" to (0x70 + it - 1) }.toTypedArray(),
         // numpad
         *(0..9).map { "num$it" to (0x60 + it) }.toTypedArray(),
         "back" to 0x08, "tab" to 0x09, "enter" to 0x0D, "escape" to 0x1B, "esc" to 0x1B,
@@ -150,4 +150,3 @@ object SendInput {
         fun SendInput(nInputs: Int, pInputs: Long, cbSize: Int): Int
     }
 }
-

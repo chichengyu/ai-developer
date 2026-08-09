@@ -105,6 +105,8 @@ def main() -> int:
                 failures.append(f"{name} missing concurrency limit")
             if re.search(r"\bTODO\b|\bFIXME\b", text, flags=re.IGNORECASE):
                 failures.append(f"{name} contains TODO/FIXME")
+            if name == "threading_pool_pyside6.py" and "runnable.deleteLater()" in text:
+                failures.append(f"{name} calls deleteLater on QRunnable")
         else:
             failures.append(f"{name} is not classified as single or pool template")
         if name not in playbook:

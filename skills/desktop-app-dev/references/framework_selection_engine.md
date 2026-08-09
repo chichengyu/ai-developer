@@ -42,6 +42,29 @@ such as `target_os` must use inline JSON-style arrays
 
 ---
 
+## Language-first mode (choose UI after choosing language)
+
+The brief mode answers "which framework overall?" The `--language` mode
+answers "I already chose the language; which UI frameworks should I
+compare?" Run:
+
+```powershell
+python scripts/select_framework.py --language python
+python scripts/select_framework.py --language csharp
+python scripts/select_framework.py --language rust
+```
+
+Output order is: recommended best overall first, then alternatives. Each
+entry includes a score, one-line rationale, pros, cons, and representative
+performance (cold start + EXE size). The user makes the final call; the
+engine never silently defaults to the language's native UI toolkit.
+
+The shortlists live in `LANGUAGE_UI_PROFILES` inside
+`scripts/select_framework.py`. When a language gains a new best-in-class
+UI framework, add its profile row and run `--self-test`.
+
+---
+
 ## Algorithm
 
 ### Step 1: derive weights
@@ -119,9 +142,10 @@ positive dimensions (`top_reasons`) and top-2 negative dimensions
 - The framework scores are calibrated by hand against the matrix in
   `references/framework_matrix.md`. They are calibrated, not measured.
   When a framework ships a major release, re-check the relevant cells.
-- The engine picks *one* framework. Sometimes the right answer is "two
-  frontends" (e.g. Tauri for the desktop, MAUI for mobile). When in doubt,
-  read the top-3 rationale and decide.
+- The engine picks *one* framework, and the `--language` mode still
+  returns a shortlist rather than a human approval. Sometimes the right
+  answer is "two frontends" (e.g. Tauri for the desktop, MAUI for mobile).
+  When in doubt, read the top-3 rationale and decide with the user.
 - It does not consider *organizational* constraints (existing codebases,
   internal skills, hiring market, license audits). Add those as
   `team_languages` and `oss_only` for now; future versions will add

@@ -11,7 +11,8 @@ templates in this skill. The engine is exposed to every desktop UI
 language through `scripts/media_pipeline_service.py` plus the ready-made
 `clients/` wrappers; runtime dependencies install through
 `scripts/builtin_dependency_manager.py`, `scripts/media_dependencies.py`,
-and `scripts/setup_media_dependencies.ps1`.
+`scripts/setup_media_dependencies.ps1`, or all at once through
+`scripts/ensure_all_dependencies.py --install`.
 
 ## 1. Architecture
 
@@ -442,8 +443,9 @@ adapter explicitly shares it.
 - Built-in dependency center (UI-19): show one status row per runtime,
   call `POST /deps/install` after the user clicks `安装依赖`, poll
   `GET /deps/progress` for bytes / speed / ETA / stage, and use
-  `scripts/builtin_dependency_manager.py` when the app needs a generic
-  app-local dependency manifest instead of the media-specific installer.
+  `scripts/dependency_center.py` with a `dependencies.json` manifest when
+  the app needs a generic dependency menu, or
+  `scripts/builtin_dependency_manager.py` for direct app-local installs.
 - Before a transcode job, the UI can call `POST /media/probe` with
   `{"path": "C:\\media\\input.mp4"}` to get duration, streams, codecs,
   and resolution so the user sees source metadata before choosing a

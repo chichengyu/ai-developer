@@ -5,9 +5,10 @@ applications.
 
 ## Entry point
 
-`SKILL.md` -- read this first. It defines the 8-step workflow
+`SKILL.md` -- read this first. It is a compact workflow index
 (requirements -> classify -> pick framework -> decompose -> core patterns
 -> package -> verify -> hand off) plus the "When NOT to use" anti-trigger.
+Deep details live in `references/` and are read on demand.
 
 ## When to use
 
@@ -74,7 +75,8 @@ The Windows Python template also includes mouse helpers (`move_mouse`,
 ```
 SKILL.md                          slim 8-step entry point + When-NOT-to-use
 README.md                         this file
-CHANGELOG.md                      what changed and when
+CHANGELOG.md                      short changelog index
+changelog/                        full index + per-round detail files
 LICENSE                           MIT
 pyproject.toml                    ruff + mypy config
 requirements-dev.txt              pinned ruff / mypy / types-requests
@@ -102,7 +104,7 @@ scripts/
   sendinput_* + SendInput.java (12 files: 10 Windows languages + macOS/Linux analogues)  keyboard input; Python also has mouse
   window_enum_* + WindowEnum.java (12 files: 9 Windows languages + Node C++ shim + macOS/Linux analogues)  drop-in window enumeration
   threading_*       (30 files: 22 single-worker + 8 pool templates) cancel/progress/UI bridge + bounded concurrency
-  select_framework.py             auto-select framework from requirements brief
+  select_framework.py             auto-select language, then list UI candidates per language
   build_*.ps1       (14 helpers)  packaging helpers
   build_dmg.sh / build_appimage.sh / build_deb.sh  macOS / Linux packaging helpers
   auto_update_*                   Velopack / Squirrel / WinSparkle / Sparkle / AppImageUpdate
@@ -117,6 +119,11 @@ scripts/
   file_converter.py               all-format convert engine (ffmpeg + stdlib + batch)
   page_data_parser.py             deep page parse + CLI: metadata, embedded JSON, API endpoints
   api_client.py                   API specs from captures + rate-limited API fetching
+  smart_fetch.py                  auto multi-backend anti-bot HTTP fetch (curl_cffi/cloudscraper/httpx/urllib)
+  ensure_all_dependencies.py      one-pass check/install for web-fetch + media + manifest deps
+  ensure_web_fetch_dependencies.py auto-check/install optional web-fetch packages
+  flaresolverr.py                 standard-library client for local FlareSolverr
+  stealth_browser.py              Patchright / nodriver / DrissionPage deep solvers
   api_analyzer.py                 API manifest: auth headers, scores, data paths, pagination
   data_processor.py               declarative filter/sort/dedupe/aggregate + JSON/JSONL/CSV I/O
   web_data_pipeline.py            one-config end-to-end web data pipeline
@@ -124,6 +131,8 @@ scripts/
   task_queue.py                   SQLite persistent task queue
   captcha_solver.py etc.          CAPTCHA auto-detect/solve, browser session + network capture, ffmpeg, publisher
   builtin_dependency_manager.py   app-local one-click runtime installer (UI-19)
+  dependency_center.py            manifest-driven dependency menu + chunked install
+  lazy_python_dependency.py       check/install optional Python deps on first use
   media_dependencies.py           check / install manager (default check-only)
   media_pipeline_service.py       local HTTP sidecar for any desktop UI language
   proxy_pool.py                   rotating proxy pool + named pool store
@@ -146,6 +155,7 @@ templates/
   gui_framework_decision_tree.md  second-level tool picker
   release_checklist.md            release gate checklist
   security_checklist.md           security review checklist
+  dependency_manifest.example.json fill-in dependency manifest (homepage/url per project)
   heavy_desktop_acceptance.md     heavy desktop data/performance/stability acceptance fill-in
   desktop_ui_tokens.json          one token source for color/type/spacing/dimensions
   desktop_ui_checklist.md         deep desktop UI acceptance checklist
@@ -155,6 +165,7 @@ examples/                         minimal runnable projects
   winui3-threading/               C# WinUI 3 + threading_winui.cs
   tkinter-threading/              Python tkinter + threading_tkinter.py
   pyside6-threading/              Python PySide6 + threading_pyside6.py
+  pyside6-management/             PySide6 .ui shell: nav, loading, lazy deps, clean exit
   tauri-threading/                Rust + Web + threading_tauri.rs
   msix-packaging/                 WPF + Windows App SDK packaged as MSIX
   nativeaot-winforms/             WinForms NativeAOT single-file EXE
@@ -168,7 +179,10 @@ tests/                            smoke tests + BOM regression + fixtures
 ## Quick recipe -- game automation bot
 
 1. Fill `templates/requirements_checklist.md` (six-bucket interrogation).
-2. Pick framework from `references/framework_matrix.md` (likely Python or C#).
+2. Pick the language from `references/framework_matrix.md`, then run
+   `python scripts/select_framework.py --language python` (or the chosen
+   language) to review that language's best UI frameworks with pros/cons
+   and performance before committing.
 3. Decompose tasks with `templates/task_card.md`.
 4. Drop in `scripts/sendinput_<lang>` + `scripts/window_enum_<lang>`.
 5. Use `scripts/threading_<lang>` for the UI bridge.
@@ -187,6 +201,15 @@ multi-monitor setups, and apply `references/ui_hard_requirements.md`
 apps, open `references/heavy_desktop_playbook.md`, copy
 `templates/heavy_desktop_acceptance.md`, and measure with
 `scripts/heavy_desktop_verify.ps1 -AppPath <exe> -SampleSeconds 60`.
+
+For a ready-to-copy PySide6 starting point, use
+`examples/pyside6-management/`: it loads `app.ui` with `QUiLoader`, keeps
+one table per navigation page, gives every button/table a loading state,
+lazy-loads optional dependencies on first use, and cancels all
+`JobRunner`s/pools/child processes on close. See its `README.md` for the
+`-FastStart -InstallDeps` build command. PySide6 is only for Python
+projects; C#/Tauri/Electron and other languages do not need it and should
+use their own UI files and dependency managers.
 For deep desktop UI work, use `references/desktop_ui_playbook.md` with
 `templates/desktop_ui_tokens.json` and `templates/desktop_ui_checklist.md`.
 
@@ -208,8 +231,10 @@ For deep desktop UI work, use `references/desktop_ui_playbook.md` with
    automatically downloads / installs / configures Playwright / ffmpeg /
    pycryptodome into the app-local runtime with live bytes / speed / ETA.
    The same flow works outside the sidecar with
+   `scripts/dependency_center.py` (manifest + menu) /
    `scripts/builtin_dependency_manager.py` or
-   `scripts/setup_media_dependencies.ps1 -Install`.
+   `scripts/setup_media_dependencies.ps1 -Install`; or install every
+   optional group at once with `scripts/ensure_all_dependencies.py --install`.
 7. Show live progress in the UI by polling `/tasks/<id>/progress` or using
    the `taskProgress` / `taskEvents` client wrappers with long-poll
    `timeout`; snapshots include total file size, downloaded/output bytes,
@@ -225,6 +250,17 @@ For deep desktop UI work, use `references/desktop_ui_playbook.md` with
    and `scripts/captcha_solver.py` (auto CAPTCHA) for logged-in flows.
 3. Analyze pages with `scripts/page_data_parser.py`.
 4. Turn captures into API specs and fetch them with `scripts/api_client.py`.
+   For Cloudflare / WAF-heavy targets, add `"fetch": {"backend": "auto"}`
+   so `scripts/smart_fetch.py` switches between `curl_cffi`, `cloudscraper`,
+   `httpx`, and the standard-library fallback automatically. Auto mode
+   defaults to `"auto_install": true`, so missing web-fetch packages are
+   downloaded on first use; set it to `false` to disable. You can also run
+   `scripts/ensure_web_fetch_dependencies.py` directly.
+   For Managed Challenge / Turnstile, add `"browser": {"engine":
+   "patchright", "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+   "auto_install": true}` or `"stealth_engine": "nodriver"` and use
+   `scripts/flaresolverr.py` / `scripts/stealth_browser.py` for deeper
+   browser-level solving.
 5. Classify Cloudflare / WAF / rate-limit / CAPTCHA / login / geo blocks
    automatically with `scripts/security_detector.py`, and run
    `scripts/deep_crawler.py` when the job needs recursive link / sitemap
@@ -250,6 +286,10 @@ powershell -ExecutionPolicy Bypass -File scripts/build_dotnet_nativeaot.ps1 `
 # Python tkinter / PySide6: PyInstaller onefile
 powershell -ExecutionPolicy Bypass -File scripts/build_python.ps1 `
   -Entry app.py -Name MyApp -BackupSource
+
+# Python / PySide6: fast-start OneDir build + auto install project deps
+powershell -ExecutionPolicy Bypass -File scripts/build_python.ps1 `
+  -Entry app.py -Name MyApp -Install -InstallDeps -FastStart
 
 # Go Fyne / Gio: static single EXE
 powershell -ExecutionPolicy Bypass -File scripts/build_go_gio.ps1 -Output MyApp.exe

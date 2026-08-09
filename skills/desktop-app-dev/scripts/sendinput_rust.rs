@@ -32,7 +32,7 @@ fn vk_map() -> &'static HashMap<String, u16> {
             m.insert(c.to_string(), 0x30 + i as u16);
         }
         for i in 1..=24 {
-            m.insert(format!("f{}", i), 0x6F + i - 1);
+            m.insert(format!("f{}", i), 0x70 + i - 1);
         }
         for i in 0..10 {
             m.insert(format!("num{}", i), 0x60 + i as u16);

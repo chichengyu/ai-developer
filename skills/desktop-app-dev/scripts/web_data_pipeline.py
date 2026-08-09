@@ -36,10 +36,10 @@ from cloudflare_challenge import (
 )
 from data_processor import load_records, process_records, save_records
 from deep_crawler import CrawlConfig, CrawledResponse, DeepCrawler
-from media_session import MediaSession
 from page_data_parser import analyze_page
 from proxy_pool import ProxyPool
 from security_detector import detect_security_mechanisms
+from smart_fetch import create_fetch_session
 
 
 def _read_config(path: str | Path) -> dict[str, Any]:
@@ -103,6 +103,7 @@ class WebDataPipeline:
         self.security_config = config.get("security") or {}
         self.crawl_config = config.get("crawl") or {}
         self.cloudflare_config = config.get("cloudflare") or {}
+        self.fetch_config = config.get("fetch") or {}
         self.crawl_result: Any = None
         self._browser_captures: dict[str, PageCapture] = {}
         self.api_security_findings = 0
@@ -191,6 +192,7 @@ class WebDataPipeline:
             storage_state=self.browser_config.get("storage_state"),
             action_interval=float(self.browser_config.get("action_interval", 0.0)),
             action_jitter=float(self.browser_config.get("action_jitter", 0.2)),
+            engine=self.browser_config.get("engine", "playwright"),
         )
         session.start()
         cookies_path = self.browser_config.get("cookies_path")
@@ -293,16 +295,22 @@ class WebDataPipeline:
         proxy = self.api_config.get("proxy") or self.browser_config.get("proxy")
         if not proxy and self.proxy_pool is not None:
             proxy = self.proxy_pool.get_proxy()
-        session = MediaSession(
+        session = create_fetch_session(
+            self.fetch_config,
             headers=self.api_config.get("headers"),
             proxy=proxy,
             proxy_pool=self.proxy_pool,
             min_interval=float(self.api_config.get("min_interval", 0.0)),
             max_retries=int(self.api_config.get("max_retries", 0)),
+            backoff_base=float(self.api_config.get("backoff_base", 0.5)),
+            backoff_max=float(self.api_config.get("backoff_max", 30.0)),
         )
         if self._api_cookies:
             session.load_cookies(self._api_cookies)
-        body, status, headers = session.get_bytes_with_meta(url)
+        try:
+            body, status, headers = session.get_bytes_with_meta(url)
+        finally:
+            session.close()
         html = body.decode("utf-8", "replace")
         security = None
         if self.security_config.get("enabled", True):
@@ -332,7 +340,8 @@ class WebDataPipeline:
             proxy = self.proxy_pool.get_proxy()
         min_interval = float(crawl.get("min_interval", self.api_config.get("min_interval", 0.0)))
         max_retries = int(crawl.get("max_retries", self.api_config.get("max_retries", 0)))
-        session = MediaSession(
+        session = create_fetch_session(
+            self.fetch_config,
             headers=self.api_config.get("headers"),
             proxy=proxy,
             proxy_pool=self.proxy_pool,
@@ -383,6 +392,7 @@ class WebDataPipeline:
             )
             result = crawler.crawl()
         finally:
+            session.close()
             if browser_mode and self.session is not None:
                 if self.session.context is not None:
                     self._browser_cookies = list(self.session.context.cookies())
@@ -456,6 +466,10 @@ class WebDataPipeline:
         ]
         if not blocked:
             return
+        stealth_engine = self.browser_config.get("stealth_engine")
+        if stealth_engine:
+            self._stealth_escalate_blocked(blocked, str(stealth_engine))
+            return
         try:
             session = self._open_browser()
         except Exception:
@@ -475,6 +489,56 @@ class WebDataPipeline:
                     self.session.save_cookies(cookies_path)
                 self.session.close()
                 self.session = None
+
+    def _stealth_escalate_blocked(
+        self,
+        blocked: list[int],
+        engine: str,
+    ) -> None:
+        from stealth_browser import solve_cloudflare_with_stealth_browser
+
+        proxy = self.browser_config.get("proxy")
+        if not proxy and self.proxy_pool is not None:
+            proxy = self.proxy_pool.get_proxy()
+        for index in blocked:
+            url = self.captures[index].url
+            try:
+                result = solve_cloudflare_with_stealth_browser(
+                    url,
+                    engine=engine,
+                    proxy=proxy,
+                    browser_path=self.browser_config.get("browser_path"),
+                    headless=bool(self.browser_config.get("headless", True)),
+                    timeout_ms=float(self.browser_config.get("challenge_timeout", 60000)),
+                    auto_install=bool(self.browser_config.get("auto_install", True)),
+                )
+            except Exception:
+                continue
+            if result is None or not result.html:
+                continue
+            cookies = list(result.cookies or [])
+            self._api_cookies.extend(cookies)
+            self._browser_cookies.extend(cookies)
+            security = None
+            if self.security_config.get("enabled", True):
+                report = detect_security_mechanisms(
+                    200,
+                    url,
+                    {},
+                    result.html,
+                    html=result.html,
+                    page_url=url,
+                )
+                security = report.to_dict()
+            capture = PageCapture(
+                url=url,
+                html=result.html,
+                network=[],
+                analysis=analyze_page(result.html, base_url=url),
+                security=security,
+            )
+            self.captures[index] = capture
+            self._browser_captures[url] = capture
 
     def collect(self) -> list[PageCapture]:
         if self.crawl_config.get("enabled", False):
@@ -558,10 +622,18 @@ class WebDataPipeline:
             backoff_base=float(self.api_config.get("backoff_base", 0.5)),
             backoff_max=float(self.api_config.get("backoff_max", 30.0)),
             cookies=cookies,
+            backend=self.fetch_config.get(
+                "backend",
+                self.api_config.get("backend", "standard"),
+            ),
+            auto_install=self.fetch_config.get("auto_install"),
         )
-        results = client.fetch_all(
-            self.specs, concurrency=int(self.api_config.get("concurrency", 1))
-        )
+        try:
+            results = client.fetch_all(
+                self.specs, concurrency=int(self.api_config.get("concurrency", 1))
+            )
+        finally:
+            client.close()
         records: list[dict[str, Any]] = []
         self.api_security_findings = 0
         for result in results:
@@ -628,6 +700,10 @@ class WebDataPipeline:
             "security_findings": security_findings + self.api_security_findings,
             "crawl_summary": self.crawl_result.summary() if self.crawl_result else None,
             "cloudflare": (self._cloudflare_result.to_dict() if self._cloudflare_result else None),
+            "fetch_backend": self.fetch_config.get(
+                "backend",
+                self.api_config.get("backend", "standard"),
+            ),
             "output": str(self.output),
         }
 

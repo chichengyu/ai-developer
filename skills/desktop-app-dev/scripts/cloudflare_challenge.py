@@ -35,6 +35,7 @@ _SITEKEY_RE = re.compile(r"[?&](?:k|sitekey)=([A-Za-z0-9_\-]{8,})", re.IGNORECAS
 _RAY_RE = re.compile(r"cloudflare[\s-]*ray[^0-9]{0,24}([0-9a-f]{16,})", re.IGNORECASE)
 _ERROR_CODE_RE = re.compile(r"error[^0-9]{0,20}code\s*[:=]?\s*(\d+)", re.IGNORECASE)
 _CLEARANCE_NAME = "cf_clearance"
+_BM_COOKIE_NAME = "__cf_bm"
 
 
 @dataclass
@@ -49,6 +50,13 @@ class CloudflareChallengeState:
     error_code: str | None = None
     clearance_cookie: str | None = None
     clearance_expires: float | None = None
+    clearance_valid: bool = False
+    bm_cookie: str | None = None
+    bm_cookie_expires: float | None = None
+    server: str | None = None
+    cf_mitigated: str | None = None
+    cf_cache_status: str | None = None
+    bot_score: str | None = None
     markers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,6 +69,13 @@ class CloudflareChallengeState:
             "error_code": self.error_code,
             "clearance_cookie": self.clearance_cookie,
             "clearance_expires": self.clearance_expires,
+            "clearance_valid": self.clearance_valid,
+            "bm_cookie": self.bm_cookie,
+            "bm_cookie_expires": self.bm_cookie_expires,
+            "server": self.server,
+            "cf_mitigated": self.cf_mitigated,
+            "cf_cache_status": self.cf_cache_status,
+            "bot_score": self.bot_score,
             "markers": self.markers,
         }
 
@@ -79,6 +94,10 @@ class CloudflareChallengeConfig:
     reload_before_retry: bool = True
     reload_delay: float = 2.0
     rotate_proxy_on_fail: bool = True
+    reuse_clearance: bool = True
+    pin_proxy: bool = True
+    keep_bm_cookie: bool = True
+    clearance_passage_seconds: float = 1800
     user_agent: str | None = None
     proxy: str | None = None
 
@@ -96,6 +115,10 @@ class CloudflareChallengeConfig:
             reload_before_retry=bool(values.get("reload_before_retry", True)),
             reload_delay=float(values.get("reload_delay", 2.0)),
             rotate_proxy_on_fail=bool(values.get("rotate_proxy_on_fail", True)),
+            reuse_clearance=bool(values.get("reuse_clearance", True)),
+            pin_proxy=bool(values.get("pin_proxy", True)),
+            keep_bm_cookie=bool(values.get("keep_bm_cookie", True)),
+            clearance_passage_seconds=float(values.get("clearance_passage_seconds", 1800)),
             user_agent=values.get("user_agent"),
             proxy=values.get("proxy"),
         )
@@ -112,6 +135,10 @@ class CloudflareChallengeConfig:
             "reload_before_retry": self.reload_before_retry,
             "reload_delay": self.reload_delay,
             "rotate_proxy_on_fail": self.rotate_proxy_on_fail,
+            "reuse_clearance": self.reuse_clearance,
+            "pin_proxy": self.pin_proxy,
+            "keep_bm_cookie": self.keep_bm_cookie,
+            "clearance_passage_seconds": self.clearance_passage_seconds,
             "user_agent": self.user_agent,
             "proxy": self.proxy,
         }
@@ -126,6 +153,8 @@ class CloudflareChallengeResult:
     strategy: str = "none"
     cf_clearance: str | None = None
     clearance_cookie: dict[str, Any] | None = None
+    cf_bm: str | None = None
+    cf_bm_cookie: dict[str, Any] | None = None
     user_agent: str | None = None
     proxy: str | None = None
     error: str | None = None
@@ -139,6 +168,8 @@ class CloudflareChallengeResult:
             "strategy": self.strategy,
             "cf_clearance": self.cf_clearance,
             "clearance_cookie": self.clearance_cookie,
+            "cf_bm": self.cf_bm,
+            "cf_bm_cookie": self.cf_bm_cookie,
             "user_agent": self.user_agent,
             "proxy": self.proxy,
             "error": self.error,
@@ -155,8 +186,15 @@ def _lower_headers(headers: dict[str, str] | None) -> dict[str, str]:
 
 
 def _find_clearance_cookie(cookies: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    return _find_cookie(cookies, _CLEARANCE_NAME)
+
+
+def _find_cookie(
+    cookies: list[dict[str, Any]] | None,
+    name: str,
+) -> dict[str, Any] | None:
     for item in cookies or []:
-        if str(item.get("name", "") or "").lower() == _CLEARANCE_NAME:
+        if str(item.get("name", "") or "").lower() == name.lower():
             return dict(item)
     return None
 
@@ -194,11 +232,22 @@ def extract_cloudflare_state(
         expires = clearance.get("expires")
         if isinstance(expires, int | float) and expires > 0:
             clearance_expires = float(expires)
+    clearance_valid = bool(clearance_value) and (
+        clearance_expires is None or clearance_expires > time.time()
+    )
+    bm = _find_cookie(cookies, _BM_COOKIE_NAME)
+    bm_value = str(bm.get("value") or "") if bm else None
+    bm_expires = None
+    if bm is not None:
+        bm_expires_raw = bm.get("expires")
+        if isinstance(bm_expires_raw, int | float) and bm_expires_raw > 0:
+            bm_expires = float(bm_expires_raw)
 
     blocked = (
         "attention required" in text
         or "error code 1020" in text
         or (ray_id is not None and "access denied" in text)
+        or lower.get("cf-mitigated") == "blocked"
     )
     present = bool(markers) or lower.get("cf-mitigated") == "challenge"
     if blocked:
@@ -211,7 +260,7 @@ def extract_cloudflare_state(
         stage = "js_challenge"
     elif present:
         stage = "managed_non_interactive"
-    elif clearance_value:
+    elif clearance_valid:
         stage = "passed"
     else:
         stage = "none"
@@ -225,6 +274,13 @@ def extract_cloudflare_state(
         error_code=error_code,
         clearance_cookie=clearance_value,
         clearance_expires=clearance_expires,
+        clearance_valid=clearance_valid,
+        bm_cookie=bm_value,
+        bm_cookie_expires=bm_expires,
+        server=lower.get("server"),
+        cf_mitigated=lower.get("cf-mitigated"),
+        cf_cache_status=lower.get("cf-cache-status"),
+        bot_score=lower.get("cf-bot-score") or lower.get("x-bot-score"),
         markers=markers,
     )
 
@@ -274,11 +330,15 @@ class CloudflareChallengeHandler:
             result.state = current
             if current.stage == "blocked":
                 result.error = "cloudflare block page"
+                result.cf_bm = current.bm_cookie
+                result.cf_bm_cookie = _find_cookie(context.cookies(), _BM_COOKIE_NAME)
                 return result
-            if not current.present and not current.clearance_cookie:
+            if not current.present and not current.clearance_valid:
                 result.passed = True
                 result.strategy = "none"
                 result.user_agent = self._user_agent(page) or result.user_agent
+                result.cf_bm = current.bm_cookie
+                result.cf_bm_cookie = _find_cookie(context.cookies(), _BM_COOKIE_NAME)
                 return result
 
             cookie = self._wait_for_clearance(context)
@@ -288,12 +348,16 @@ class CloudflareChallengeHandler:
                 result.cf_clearance = str(cookie.get("value") or "")
                 result.clearance_cookie = cookie
                 result.user_agent = self._user_agent(page) or result.user_agent
+                result.cf_bm = current.bm_cookie
+                result.cf_bm_cookie = _find_cookie(context.cookies(), _BM_COOKIE_NAME)
                 return result
 
             if self._wait_until_passed(page, context, url):
                 result.passed = True
                 result.strategy = "wait"
                 result.user_agent = self._user_agent(page) or result.user_agent
+                result.cf_bm = current.bm_cookie
+                result.cf_bm_cookie = _find_cookie(context.cookies(), _BM_COOKIE_NAME)
                 return result
 
             if self.config.auto_click and self._try_click(page):
@@ -305,11 +369,15 @@ class CloudflareChallengeHandler:
                     result.cf_clearance = str(cookie.get("value") or "")
                     result.clearance_cookie = cookie
                     result.user_agent = self._user_agent(page) or result.user_agent
+                    result.cf_bm = current.bm_cookie
+                    result.cf_bm_cookie = _find_cookie(context.cookies(), _BM_COOKIE_NAME)
                     return result
                 if self._wait_until_passed(page, context, url):
                     result.passed = True
                     result.strategy = "click_wait"
                     result.user_agent = self._user_agent(page) or result.user_agent
+                    result.cf_bm = current.bm_cookie
+                    result.cf_bm_cookie = _find_cookie(context.cookies(), _BM_COOKIE_NAME)
                     return result
 
             sitekey = current.sitekey or self._extract_sitekey(page)
@@ -323,6 +391,8 @@ class CloudflareChallengeHandler:
                 result.passed = True
                 result.strategy = "turnstile"
                 result.user_agent = self._user_agent(page) or result.user_agent
+                result.cf_bm = current.bm_cookie
+                result.cf_bm_cookie = _find_cookie(context.cookies(), _BM_COOKIE_NAME)
                 return result
 
             if self.config.reload_before_retry and attempt + 1 < attempts:
@@ -362,11 +432,20 @@ class CloudflareChallengeHandler:
     def _wait_for_clearance(self, context: Any) -> dict[str, Any] | None:
         deadline = time.monotonic() + self.config.clearance_timeout / 1000.0
         while time.monotonic() < deadline:
-            cookie = _find_clearance_cookie(context.cookies())
+            cookie = self._valid_clearance_cookie(context)
             if cookie:
                 return cookie
             time.sleep(self.config.poll_interval)
         return None
+
+    def _valid_clearance_cookie(self, context: Any) -> dict[str, Any] | None:
+        cookie = _find_clearance_cookie(context.cookies())
+        if cookie is None:
+            return None
+        expires = cookie.get("expires")
+        if isinstance(expires, int | float) and expires > 0 and expires <= time.time():
+            return None
+        return cookie
 
     def _wait_until_passed(
         self,
@@ -376,7 +455,7 @@ class CloudflareChallengeHandler:
     ) -> bool:
         deadline = time.monotonic() + self.config.wait_timeout / 1000.0
         while time.monotonic() < deadline:
-            if _find_clearance_cookie(context.cookies()):
+            if self._valid_clearance_cookie(context):
                 return True
             state = self._state(page, context, url)
             if state is not None and not state.present:

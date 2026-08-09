@@ -36,7 +36,7 @@ Map<String, int> _buildVkMap() {
   final m = <String, int>{};
   for (var i = 0; i < 26; i++) m[String.fromCharCode(0x61 + i)] = 0x41 + i;
   for (var i = 0; i < 10; i++) m['\$i'] = 0x30 + i;
-  for (var i = 1; i <= 24; i++) m['f\$i'] = 0x6F + i - 1;
+  for (var i = 1; i <= 24; i++) m['f\$i'] = 0x70 + i - 1;
   for (var i = 0; i < 10; i++) m['num\$i'] = 0x60 + i;
   m.addAll({
     'back': 0x08, 'tab': 0x09, 'enter': 0x0D, 'escape': 0x1B, 'esc': 0x1B,

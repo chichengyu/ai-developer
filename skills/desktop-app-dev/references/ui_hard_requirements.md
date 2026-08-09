@@ -84,6 +84,32 @@ Example Codex-like dark token set (use the framework equivalent):
   second table, open a separate page / view instead of stacking two
   tables side by side.
 
+## Loading states (all buttons and lists)
+
+- Every action button that starts a background job shows a visible busy
+  state: disabled plus a text suffix or spinner-equivalent progress.
+- Every list / table that is loading shows a visible progress bar. When
+  the background job reports progress, the bar renders 0-100%; when no
+  percentage is available it stays indeterminate. The bar and disabled
+  state are restored only after the job settles (done / failed /
+  cancelled).
+- Busy state is per control and reference-counted, so two simultaneous
+  jobs never clear a loading state early.
+- No job starts a button/table loading state without a matching settle
+  path; failures also restore controls and log the reason.
+
+## Startup loading screen (packaged EXE)
+
+- Every packaged EXE shows a startup window with animation and a visible
+  progress bar before the main window opens; a blank window during startup
+  is not acceptable.
+- The startup screen may fade in, animate a logo / title, or cycle status
+  text. If initialization can report progress, the bar renders 0-100%.
+- Startup work stays non-blocking enough to repaint the animation; when
+  initialization finishes, the splash hides and the main window appears.
+- Startup failures go to the crash log / log center and the splash shows a
+  readable error instead of freezing forever.
+
 ## UI-06 页面标题不重复 (No duplicated page title)
 
 - When the left navigation already shows the menu name, the right table
@@ -273,6 +299,20 @@ Rules:
 - Every shipped app that needs an external runtime (ffmpeg / ffprobe,
   tesseract, ImageMagick, Playwright Chromium, aria2, 7z, etc.) manages
   that runtime inside the app; recipients never install it globally.
+- After development, every runtime dependency is recorded in a dependency
+  manifest (`dependencies.json`) and displayed in the dependency center
+  menu: name, version, status, install path. The user does nothing except
+  click `安装依赖` / `修复` / `更新`.
+- The dependency center also shows plain-language help for every entry:
+  what the dependency is for, where it will be installed, and the exact
+  manual download / install steps (download URL, target directory, and
+  restart behavior) for users who choose not to use the automatic button.
+- Every dependency entry carries an official website URL (`homepage`); the UI
+  renders it as a clickable link so the user can open the official page
+  directly in the system's default external browser. The URL comes from
+  each project's dependency manifest (`dependencies.json`) only;
+  application code must not hard-code any dependency name or URL because
+  every project has different dependencies.
 - App-managed runtime directory, no admin required for portable
   dependencies: `%LOCALAPPDATA%\<AppName>\runtime` (Windows),
   `~/Library/Application Support/<AppName>/runtime` (macOS),
@@ -289,6 +329,9 @@ Rules:
   app-local path configuration, and status refresh. No terminal
   commands, no manual PATH editing, no browser download page, no
   interactive prompts.
+- Slow or large downloads automatically use chunked concurrent download
+  with resume/retry; the UI keeps showing bytes, speed, ETA, stage, and
+  current dependency until every item is ready or a failure is logged.
 - The app never auto-installs silently on launch. Startup only checks
   status and shows the install button; install requires the explicit
   user click.
@@ -298,6 +341,12 @@ Rules:
 - The app uses the app-local binary path directly (for example the
   ffmpeg path passed to the conversion engine), never relying on the
   recipient's system PATH.
+- Optional Python modules follow the same rule with
+  `scripts/lazy_python_dependency.py`: checked only on first use, installed
+  into `%LOCALAPPDATA%\<AppName>\runtime\py-deps` with `pip --target` in
+  source mode, and bundled at build time via
+  `scripts/build_python.ps1 -InstallDeps` for frozen EXEs so recipients
+  never run pip or download anything themselves.
 - Failure goes to the log center (UI-13) with the exact reason and a
   suggested fix; the install / repair button remains available for
   retry.
@@ -326,3 +375,10 @@ Rules:
 - [ ] UI-19 one-click dependency center downloads into app-local
   runtime with live bytes / speed / ETA, no manual input, no global
   install, and retry / repair on failure
+- [ ] UI-19 dependency center menu lists every runtime dependency from
+  the manifest; the user only clicks `安装依赖` and the app finishes with
+  chunked / resumable download, verification, extraction, and status refresh
+- [ ] Every list / table page has a loading progress bar; it appears while
+  data loads and reflects 0-100% when the job emits progress
+- [ ] Packaged EXE shows a startup animation + progress bar before the
+  main window; splash hides only after initialization finishes

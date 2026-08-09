@@ -85,11 +85,21 @@ for node in ast.walk(tree):
         for t in node.targets
     ):
         if isinstance(node.value, ast.Dict):
-            vk_names = {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+            vk_values = {
+                k.value: v.value
+                for k, v in zip(node.value.keys, node.value.values)
+                if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)
+            }
+            vk_names = set(vk_values)
 assert 'f5' in vk_names, 'f5 missing'
 assert 'left' in vk_names, 'left missing'
 assert 'enter' in vk_names, 'enter missing'
 assert 'lcmd' in vk_names, 'lcmd missing (macOS-specific)'
+assert vk_values.get('f1') == 0x7A, 'f1 must be kVK_F1 (0x7A)'
+assert vk_values.get('left') == 0x7B, 'left must be kVK_LeftArrow (0x7B)'
+assert vk_values.get('delete') == 0x75, 'delete must be kVK_ForwardDelete (0x75)'
+assert vk_values.get('lcmd') == 0x37, 'lcmd must be kVK_Command (0x37)'
+assert vk_values.get('enter') == 0x24, 'enter must be kVK_Return (0x24)'
 assert len(vk_names) >= 70, f'expected >= 70 VKs, got {len(vk_names)}'
 print(f'  sendinput_macos.py: {len(vk_names)} VK entries')
 "
@@ -141,6 +151,8 @@ if command -v python3 >/dev/null 2>&1; then
     run "test_no_bom.py" python3 "$SKILL_ROOT/tests/test_no_bom.py"
     run "test_threading_templates.py" python3 "$SKILL_ROOT/tests/test_threading_templates.py"
     run "test_threading_concurrency.py" python3 "$SKILL_ROOT/tests/test_threading_concurrency.py"
+    run "test_pyside6_management.py" python3 "$SKILL_ROOT/tests/test_pyside6_management.py"
+    run "test_dependency_center.py" python3 "$SKILL_ROOT/tests/test_dependency_center.py"
 fi
 
 # 7. Arch awareness (optional, requires PowerShell)

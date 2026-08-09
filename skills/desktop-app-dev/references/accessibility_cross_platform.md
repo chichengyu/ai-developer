@@ -171,11 +171,11 @@ Need to write input?
 
 ## Tooling recipes
 
-### Windows: enumerate every clickable element on screen
+### Windows: enumerate every UI element on screen
 
 ```powershell
-# requires scripts/accessibility_uia.py on PYTHONPATH
-python -c "from accessibility_uia import enumerate_clickable; enumerate_clickable()"
+# requires scripts/accessibility_uia.py on PYTHONPATH and `pip install comtypes`
+python -c "from accessibility_uia import UIAClient; c = UIAClient(); [print(e.name, e.control_type) for e in c.walk_tree(c.root_element(), max_depth=4)]"
 ```
 
 ### macOS: dump the frontmost app's element tree

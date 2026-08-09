@@ -78,7 +78,7 @@ public enum VK {
 
     public static func function(_ n: Int) -> UInt16 {
         precondition((1...24).contains(n), "F1-F24 only")
-        return UInt16(0x6F + n - 1)
+        return UInt16(0x70 + n - 1)
     }
 }
 

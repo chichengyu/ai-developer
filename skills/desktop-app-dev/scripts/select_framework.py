@@ -1166,6 +1166,243 @@ RATIONALES = {
 }
 
 
+LANGUAGE_UI_PROFILES: dict[str, dict[str, object]] = {
+    "python": {
+        "recommended": "pyside6",
+        "frameworks": {
+            "pyside6": {
+                "pros": "Modern Qt6 widgets, data grids, charts, professional dashboards",
+                "cons": "Larger EXE, slower cold start, Python-only",
+                "performance": "cold ~0.6s; EXE ~70-180MB",
+            },
+            "tkinter": {
+                "pros": "Zero install, fastest prototype, small EXE, SendInput friendly",
+                "cons": "Dated look without themes, weak 100k-row data grids",
+                "performance": "cold ~0.3s; EXE ~10-40MB",
+            },
+            "py_gtk": {
+                "pros": "Native GNOME/Adwaita look on Linux",
+                "cons": "Windows/macOS packaging fragile, GIR typelibs",
+                "performance": "cold ~0.5s; EXE ~60MB+",
+            },
+        },
+    },
+    "csharp": {
+        "recommended": "wpf",
+        "frameworks": {
+            "wpf": {
+                "pros": "Mature MVVM, data binding, Win32 interop, most LOB apps",
+                "cons": "Windows-only, XAML learning curve",
+                "performance": "cold ~0.5s; EXE ~70MB self-contained",
+            },
+            "winui3": {
+                "pros": "Windows 11 Fluent/Mica, Store-friendly",
+                "cons": "Win10 1809+ only, MSIX friction",
+                "performance": "cold ~0.4s; EXE similar to WPF",
+            },
+            "avalonia": {
+                "pros": "WPF-like XAML on Windows/macOS/Linux",
+                "cons": "Smaller ecosystem than WPF",
+                "performance": "cold ~0.5s; EXE ~50MB self-contained",
+            },
+            "winforms": {
+                "pros": "Fastest .NET tool UI, NativeAOT-compatible tiny EXE",
+                "cons": "Dated look, weaker data-grid virtualization",
+                "performance": "cold ~0.4s; EXE ~5MB NativeAOT",
+            },
+            "maui": {
+                "pros": "One C# codebase across Windows/macOS/iOS/Android",
+                "cons": "Desktop maturity behind WPF, larger download",
+                "performance": "cold ~0.5s; EXE ~80MB self-contained",
+            },
+        },
+    },
+    "rust": {
+        "recommended": "tauri",
+        "frameworks": {
+            "tauri": {
+                "pros": "Smallest cross-platform EXE, web frontend, Rust performance",
+                "cons": "Requires Rust + WebView2 distribution story",
+                "performance": "cold ~0.2s; EXE ~5-10MB",
+            },
+            "slint": {
+                "pros": "True native widgets, declarative UI, tiny EXE",
+                "cons": "Smaller ecosystem than Qt",
+                "performance": "cold ~0.2s; EXE ~3MB",
+            },
+            "egui": {
+                "pros": "Immediate-mode, fast iteration for tools/debug UI",
+                "cons": "Distinctive look, not for polished consumer apps",
+                "performance": "cold ~0.2s; EXE ~3-8MB",
+            },
+        },
+    },
+    "go": {
+        "recommended": "wails",
+        "frameworks": {
+            "wails": {
+                "pros": "Go backend + web frontend, small EXE, system WebView",
+                "cons": "WebView2-only story on Windows, needs npm frontend",
+                "performance": "cold ~0.3s; EXE ~5-15MB",
+            },
+            "fyne": {
+                "pros": "Pure-Go native widgets, cross-platform",
+                "cons": "Custom look, fewer polished controls",
+                "performance": "cold ~0.3s; EXE ~10-20MB",
+            },
+            "gio": {
+                "pros": "GPU immediate-mode, tiny EXE",
+                "cons": "Lower-level, smaller ecosystem",
+                "performance": "cold ~0.2s; EXE ~5-15MB",
+            },
+            "walk": {
+                "pros": "Windows-only native Win32 look, tiny EXE",
+                "cons": "Windows-only, less active ecosystem",
+                "performance": "cold ~0.2s; EXE ~5-10MB",
+            },
+        },
+    },
+    "cpp": {
+        "recommended": "qt6",
+        "frameworks": {
+            "qt6": {
+                "pros": "Comprehensive cross-platform widgets/QML, deep OS access",
+                "cons": "GPL or paid license, large dependency",
+                "performance": "cold ~0.2s QML / ~0.4s Widgets; EXE ~20MB static",
+            },
+            "win32_mfc": {
+                "pros": "Smallest Windows EXE, ActiveX/OLE, full control",
+                "cons": "Boilerplate, Windows-only, older UI",
+                "performance": "cold ~0.1s; EXE ~0.5-3MB",
+            },
+        },
+    },
+    "typescript": {
+        "recommended": "tauri",
+        "frameworks": {
+            "tauri": {
+                "pros": "Tiny EXE, system WebView2, modern security",
+                "cons": "Requires Rust backend build",
+                "performance": "cold ~0.2s; EXE ~5-10MB",
+            },
+            "electron": {
+                "pros": "Huge ecosystem, hot reload, JS-only team",
+                "cons": "~150MB installer, 1-2s cold start, memory hog",
+                "performance": "cold ~1.5s; EXE ~80-150MB",
+            },
+            "neutralino": {
+                "pros": "Tiny TS EXE, uses system WebView, no Chromium",
+                "cons": "Smaller ecosystem, fewer mature plugins",
+                "performance": "cold ~0.3s; EXE ~2-5MB",
+            },
+        },
+    },
+    "kotlin": {
+        "recommended": "compose_multiplatform",
+        "frameworks": {
+            "compose_multiplatform": {
+                "pros": "Modern declarative UI, shared with Android/iOS",
+                "cons": "Windows desktop still maturing, larger runtime",
+                "performance": "cold ~0.6s; EXE ~80-150MB",
+            },
+            "tornadofx": {
+                "pros": "Kotlin DSL on JavaFX, good for JVM shops",
+                "cons": "JavaFX runtime/JRE, less active",
+                "performance": "cold ~1s; EXE ~50-100MB",
+            },
+            "javafx": {
+                "pros": "Mature JVM desktop, charts, free",
+                "cons": "Cold start ~1s, needs JRE/jpackage",
+                "performance": "cold ~1s; EXE ~50-100MB",
+            },
+        },
+    },
+    "java": {
+        "recommended": "javafx",
+        "frameworks": {
+            "javafx": {
+                "pros": "Mature, free, cross-platform, good charts",
+                "cons": "Cold start ~1s, needs JRE/jpackage",
+                "performance": "cold ~1s; EXE ~50-100MB",
+            },
+        },
+    },
+    "swift": {
+        "recommended": "swiftui",
+        "frameworks": {
+            "swiftui": {
+                "pros": "Apple-first native UI, small AppKit bridges on Windows",
+                "cons": "Windows is second-class",
+                "performance": "cold ~0.2s; EXE ~5-15MB",
+            },
+        },
+    },
+    "dart": {
+        "recommended": "flutter",
+        "frameworks": {
+            "flutter": {
+                "pros": "One Dart codebase across desktop/mobile/web",
+                "cons": "Desktop APIs less mature, weaker native input",
+                "performance": "cold ~0.4s; EXE ~40-80MB",
+            },
+        },
+    },
+}
+
+
+def language_candidates(language: str) -> list[str]:
+    """Return UI frameworks for a language, ranked by a neutral multi-OS score."""
+    normalized = "typescript" if language in ("javascript", "js", "typescript", "ts") else language
+    req = Requirements.from_dict(
+        {
+            "target_os": [["windows", "x64"], ["macos", "arm64"], ["linux", "x64"]],
+            "team_languages": [normalized],
+        }
+    )
+    scores = {item.name: item for item in score_all(req)}
+    candidates = [name for name, langs in FRAMEWORK_LANGUAGES.items() if normalized in langs]
+    return sorted(candidates, key=lambda name: scores[name].total, reverse=True)
+
+
+def explain_language(language: str, top: int | None = None) -> str:
+    """Render a language-first UI framework shortlist with pros/cons/perf."""
+    normalized = "typescript" if language in ("javascript", "js", "typescript", "ts") else language
+    profile = LANGUAGE_UI_PROFILES.get(normalized, {})
+    recommended = str(profile.get("recommended", ""))
+    frameworks = profile.get("frameworks", {})
+    notes = dict(frameworks) if isinstance(frameworks, dict) else {}
+    candidates = language_candidates(language)
+    if recommended and recommended in candidates:
+        candidates.remove(recommended)
+        candidates.insert(0, recommended)
+    if top:
+        candidates = candidates[:top]
+
+    lines = [f"UI framework candidates for {normalized}"]
+    lines.append("=" * 60)
+    if recommended:
+        lines.append(f"Recommended best overall: {DISPLAY_NAMES.get(recommended, recommended)}")
+    lines.append("")
+    for index, name in enumerate(candidates, 1):
+        display = DISPLAY_NAMES.get(name, name)
+        marker = "  (recommended)" if name == recommended else ""
+        lines.append(f"#{index}  {display}{marker}")
+        note = notes.get(name, {})
+        if note:
+            lines.append(f"     + {note.get('pros', '')}")
+            lines.append(f"     - {note.get('cons', '')}")
+            lines.append(f"     performance: {note.get('performance', '')}")
+        line = one_line_rationale(name, Requirements())
+        if line:
+            lines.append(f"     > {line}")
+        lines.append("")
+    lines.append(
+        "Full pros/cons: references/framework_matrix.md | "
+        "decision tree: templates/gui_framework_decision_tree.md"
+    )
+    return "\n".join(lines)
+
+
 def one_line_rationale(name, req):
     return RATIONALES.get(name, "")
 
@@ -1273,6 +1510,18 @@ def validate_tables() -> list[str]:
         if extra:
             errors.append(f"{table_name}: extra frameworks {extra}")
 
+    for language, profile in LANGUAGE_UI_PROFILES.items():
+        frameworks = profile.get("frameworks", {})
+        if not isinstance(frameworks, dict) or not frameworks:
+            errors.append(f"LANGUAGE_UI_PROFILES.{language}: empty frameworks table")
+            continue
+        recommended = profile.get("recommended")
+        if recommended not in frameworks:
+            errors.append(f"LANGUAGE_UI_PROFILES.{language}: recommended not in frameworks")
+        for name in frameworks:
+            if name not in FRAMEWORKS:
+                errors.append(f"LANGUAGE_UI_PROFILES.{language}: unknown framework {name}")
+
     try:
         toolchain_map = json.loads(
             (Path(__file__).resolve().parent / "toolchain_map.json").read_text(encoding="utf-8")
@@ -1323,6 +1572,12 @@ def self_test():
         assert arch_weights["macos_arm64_arch"] == 0.0
         assert arch_weights["linux_arm64_arch"] == 0.0
         print("  [OK]   macos/linux x64 arch weights")
+
+    python_candidates = language_candidates("python")
+    if "pyside6" not in python_candidates or "tkinter" not in python_candidates:
+        print("  [FAIL] language_candidates(python) must include PySide6 and tkinter")
+        return 1
+    print("  [OK]   language_candidates(python)")
 
     invariant_errors = validate_tables()
     for error in invariant_errors:
@@ -1436,10 +1691,50 @@ def main(argv=None):
     parser.add_argument(
         "--top", type=int, default=3, help="How many frameworks to surface (default 3)."
     )
+    parser.add_argument(
+        "--language",
+        help="After choosing a language, list its best UI framework candidates "
+        "with pros/cons/performance and exit.",
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
         return self_test()
+
+    if args.language:
+        language = args.language.strip().lower()
+        normalized = (
+            "typescript" if language in ("javascript", "js", "typescript", "ts") else language
+        )
+        valid_languages = sorted(LANGUAGE_UI_PROFILES)
+        if normalized not in valid_languages:
+            print(f"Unknown language {args.language!r}. Valid: {', '.join(valid_languages)}")
+            return 2
+        if args.json:
+            notes = LANGUAGE_UI_PROFILES[normalized]
+            candidates = language_candidates(normalized)
+            recommended = notes.get("recommended")
+            if recommended and recommended in candidates:
+                candidates.remove(recommended)
+                candidates.insert(0, recommended)
+            out = {
+                "language": normalized,
+                "recommended": recommended,
+                "candidates": [
+                    {
+                        "framework": name,
+                        "display_name": DISPLAY_NAMES.get(name, name),
+                        "pros": notes["frameworks"].get(name, {}).get("pros", ""),
+                        "cons": notes["frameworks"].get(name, {}).get("cons", ""),
+                        "performance": notes["frameworks"].get(name, {}).get("performance", ""),
+                    }
+                    for name in candidates[: args.top]
+                ],
+            }
+            print(json.dumps(out, indent=2, ensure_ascii=False))
+        else:
+            print(explain_language(normalized, top=args.top))
+        return 0
 
     brief_path = None if args.brief in (None, "-") else args.brief
     brief = load_brief(brief_path)
