@@ -10,20 +10,21 @@
 
 ## 项目简介
 
-**ai-developer-skill** 是一套专为 AI开发者的 Codex 技能集合，覆盖 Java 研发现控、跨平台应用交付与桌面数据流水线、AI 漫剧视频制作和合规网络采集。本套件包含八个可独立安装的技能：
+**ai-developer-skill** 是一套专为 AI开发者的 Codex 技能集合，覆盖 Java 研发现控、跨平台应用交付与桌面数据流水线、AI 漫剧视频制作和合规网络采集。本套件包含九个可独立安装的技能：
 
 | 技能 | 角色 | 关键能力 |
 |------|------|----------|
 | **multi-db-analyzer** | 多数据库深度分析师 | 15+ 数据库引擎统一分析：Schema、数据质量、FK拓扑、执行计划 |
 | **java-superpowers-contract** | 研发现控官 | Git worktree 隔离、四层分析契约、强制审计 |
 | **token-economizer** | 输出压缩师 | 无感压缩 Codex 输出，降低 Token 消耗 |
-| **desktop-app-dev** | 跨平台桌面应用架构师 | 8 步交付、24 框架选型、30 线程模板、媒体/Web 数据流水线、源码保护打包 |
+| **desktop-app-dev** | 跨平台桌面应用架构师 | 8 步交付、24 框架选型、30 线程模板、媒体/Web 数据流水线、内置依赖中心、源码保护打包 |
 | **mobile-app-dev** | 移动应用架构师 | 8 步交付、SwiftUI/Compose/Flutter/RN 自动选型、真机验证与上架 |
 | **scraper-unblocker** | 合规网络采集助手 | 403/429/JS 挑战/WAF 诊断、robots 合规爬虫、图片/视频/HLS 深爬 |
+| **anti-bot-web-scraper** | 深度反爬数据流水线 | 自动多后端反爬：TLS 指纹模拟、Cloudflare/WAF/Turnstile、代理池、媒体/HLS 深爬 |
 | **manga-drama-video** | AI 漫剧视频导演 | 10 步审批门禁、跨集一致性、去 AI 味审计、配音/字幕/成片 |
 | **manga-drama-video-helper** | 漫剧轻量制作助手 | 三阶段剧本/素材/合成、自动续集、全自动审核模式 |
 
-八个技能既可独立使用，也可按需组合成 Java 研发、应用交付、网络采集和漫剧视频制作链路。
+九个技能既可独立使用，也可按需组合成 Java 研发、应用交付、网络采集和漫剧视频制作链路。
 
 ---
 
@@ -42,6 +43,7 @@ ai-developer-skill/
 |   +-- desktop-app-dev/               # 跨平台桌面应用交付
 |   +-- mobile-app-dev/                # 跨平台移动应用交付
 |   +-- scraper-unblocker/             # 合规网络采集与媒体深爬
+|   +-- anti-bot-web-scraper/          # 自动多后端反爬数据流水线
 |   +-- manga-drama-video/             # AI 漫剧视频完整流水线
 |   +-- manga-drama-video-helper/      # 漫剧轻量制作助手
 ```
@@ -60,6 +62,7 @@ xcopy /E /I /Y <REPO_DIR>\skills\token-economizer %USERPROFILE%\.codex\skills\to
 xcopy /E /I /Y <REPO_DIR>\skills\desktop-app-dev %USERPROFILE%\.codex\skills\desktop-app-dev
 xcopy /E /I /Y <REPO_DIR>\skills\mobile-app-dev %USERPROFILE%\.codex\skills\mobile-app-dev
 xcopy /E /I /Y <REPO_DIR>\skills\scraper-unblocker %USERPROFILE%\.codex\skills\scraper-unblocker
+xcopy /E /I /Y <REPO_DIR>\skills\anti-bot-web-scraper %USERPROFILE%\.codex\skills\anti-bot-web-scraper
 xcopy /E /I /Y <REPO_DIR>\skills\manga-drama-video %USERPROFILE%\.codex\skills\manga-drama-video
 xcopy /E /I /Y <REPO_DIR>\skills\manga-drama-video-helper %USERPROFILE%\.codex\skills\manga-drama-video-helper
 ```
@@ -83,7 +86,7 @@ pip install qdrant-client     # Qdrant
 **方式二：对话安装（复制给 Codex）**
 
 ```
-帮我从仓库 [chichengyu/ai-developer-skill](https://github.com/chichengyu/ai-developer-skill) 安装 multi-db-analyzer、java-superpowers-contract、token-economizer、desktop-app-dev、mobile-app-dev、scraper-unblocker、manga-drama-video 和 manga-drama-video-helper 技能到 ~/.codex/skills/ 目录下
+帮我从仓库 [chichengyu/ai-developer-skill](https://github.com/chichengyu/ai-developer-skill) 安装 multi-db-analyzer、java-superpowers-contract、token-economizer、desktop-app-dev、mobile-app-dev、scraper-unblocker、anti-bot-web-scraper、manga-drama-video 和 manga-drama-video-helper 技能到 ~/.codex/skills/ 目录下
 ```
 
 ---
@@ -113,7 +116,7 @@ sequenceDiagram
 
 ### 应用与内容创作链路
 
-`desktop-app-dev` 与 `mobile-app-dev` 可独立完成从需求分析、框架选型到打包验证、交付的完整流程；`desktop-app-dev` 同时提供媒体采集、HLS 下载、Web 数据采集处理、转码发布与源码保护模板；`scraper-unblocker` 负责合规网站与媒体深爬，可与桌面应用采集链路配合；`manga-drama-video` 提供 10 步审批门禁的完整漫剧视频流水线，`manga-drama-video-helper` 提供更轻量的三阶段版本。需要更严格的跨集一致性锁和 De-AI 审计时，可把 helper 产物转交 `manga-drama-video` 继续生产。
+`desktop-app-dev` 与 `mobile-app-dev` 可独立完成从需求分析、框架选型到打包验证、交付的完整流程；`desktop-app-dev` 同时提供媒体采集、HLS 下载、Web 数据采集处理、转码发布、内置依赖中心与源码保护模板；`scraper-unblocker` 负责常规合规网站与媒体深爬，`anti-bot-web-scraper` 在 Cloudflare/WAF/Turnstile 等复杂反爬场景提供自动多后端升级流水线，可与桌面应用采集链路配合；`manga-drama-video` 提供 10 步审批门禁的完整漫剧视频流水线，`manga-drama-video-helper` 提供更轻量的三阶段版本。需要更严格的跨集一致性锁和 De-AI 审计时，可把 helper 产物转交 `manga-drama-video` 继续生产。
 
 ---
 
@@ -201,7 +204,7 @@ sequenceDiagram
 
 ### desktop-app-dev — 跨平台桌面应用交付
 
-**核心能力：** 为 Windows / macOS / Linux 原生桌面 GUI 应用提供 8 步交付流程，覆盖需求分析、应用分类、框架选型、任务拆解、核心模式、打包、验证和交付，并内置媒体采集/HLS/发布、Web 数据采集/处理流水线与源码保护。
+**核心能力：** 为 Windows / macOS / Linux 原生桌面 GUI 应用提供 8 步交付流程，覆盖需求分析、应用分类、框架选型、任务拆解、核心模式、打包、验证和交付，并内置媒体采集/HLS/发布、Web 数据采集/处理流水线、内置依赖中心、自动反爬升级与源码保护。
 
 功能清单：
 
@@ -213,17 +216,18 @@ sequenceDiagram
 | 硬件输入模板 | SendInput / CGEventPost / XTestFakeInputEvent，禁止 PostMessage 与内存写入 |
 | 窗口枚举模板 | EnumWindows / Quartz / X11 带 3 秒超时与会话缓存 |
 | 线程化模板 | 30 个模板（22 单任务 + 8 有界线程池），覆盖 WPF / WinUI / tkinter / PySide6 / Tauri 等 |
-| UI 硬性要求 | UI-01..UI-18 强制验收，未显式豁免不得跳过 |
+| UI 硬性要求 | UI-01..UI-19 强制验收（启动页、列表进度条、内置依赖中心等），未显式豁免不得跳过 |
 | 最小改动要求 | CODE-01..CODE-05 强制保留原逻辑、最小 diff，豁免须记录 |
+| 内置依赖中心 | `dependency_center.py` / `builtin_dependency_manager.py` 按 manifest 提供一键安装，可自动配置 Playwright / ffmpeg / pycryptodome 等应用内依赖 |
 | 媒体采集与发布 | `media_*` / HLS 下载 / task_queue / ffmpeg 转码 / 平台发布 / HTTP sidecar |
-| Web 数据流水线 | API 抓取/分析、深爬、Cloudflare/安全识别、代理池、多账号、定时任务、通知 |
+| Web 数据流水线 | API 抓取/分析、深爬、Cloudflare/安全识别、代理池、多账号、定时任务、通知；`smart_fetch.py` 自动多后端反爬，`flaresolverr.py` / `stealth_browser.py` 浏览器级升级 |
 | 多语言 Sidecar | `media_pipeline_service.py` + `clients/` 八语言封装，任意桌面 UI 可调用 |
 | 源码保护 | 打包前 `-BackupSource` 生成时间戳源码 zip，构建脚本不删除源码 |
 | 打包脚本 | 14 个 `build_*.ps1` + DMG / AppImage / deb 助手，覆盖主流架构 |
 | 签名与更新 | Authenticode / codesign / notarytool，Velopack / Squirrel / Sparkle 自动更新 |
 | 验证与交付 | 三平台 smoke test、架构感知测试、用户 README 与交付清单 |
 
-**依赖：** 按所选框架安装对应工具链（.NET / Rust / Python / Go / Kotlin / Swift 等），模板自带 PyInstaller、dotnet publish、Tauri 等打包方案；媒体/Web 数据模板可选 Playwright / ffmpeg / pytesseract，默认仅检测依赖，显式安装才下载。
+**依赖：** 按所选框架安装对应工具链（.NET / Rust / Python / Go / Kotlin / Swift 等），模板自带 PyInstaller、dotnet publish、Tauri 等打包方案；构建工具链默认 DryRun，显式 `-Install` 才安装；媒体/Web 可选依赖可通过 `ensure_all_dependencies.py` / `ensure_web_fetch_dependencies.py` 或内置依赖中心按需检测安装。
 
 完整命令参考：[desktop-app-dev](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/desktop-app-dev/SKILL.md)
 
@@ -267,6 +271,31 @@ sequenceDiagram
 **依赖：** Python 3.8+ 标准库即可运行；可选 Playwright / Selenium 渲染 JS 页面，ffmpeg 用于 HLS 合并。
 
 完整命令参考：[scraper-unblocker](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/scraper-unblocker/SKILL.md)
+
+---
+
+### anti-bot-web-scraper — 自动多后端反爬数据流水线
+
+**核心能力：** 从普通 HTTP 请求开始，按目标封锁类型自动升级后端：TLS 指纹模拟、Cloudflare/WAF/Turnstile 挑战处理、stealth 浏览器循环，直到返回可用 HTML 或 API JSON；同时覆盖代理池、登录会话、媒体/HLS 深爬、API 发现、数据处理、指标与守护进程运行。
+
+功能清单：
+
+| 功能 | 说明 |
+|------|------|
+| 自适应 HTTP 后端 | `smart_fetch.py` 在 curl_cffi / cloudscraper / httpx / 标准库之间自动切换 |
+| 完整采集流水线 | `web_data_pipeline.py` 用一份 JSON 配置完成采集、处理与输出 |
+| Cloudflare 深处理 | `cloudflare_challenge.py` / `turnstile_solver.py` / `challenge_cookie_bank.py` 处理 Managed Challenge、Turnstile 与 cf_clearance |
+| 浏览器级升级 | `stealth_browser.py` / `flaresolverr.py` 提供 Patchright / nodriver / DrissionPage / FlareSolverr 深层处理 |
+| WAF 与验证码 | `waf_vendor.py` 分类厂商 WAF；验证码队列、滑块与音频处理 |
+| 生产级采集 | 代理池、多账号登录、限速重试、任务守护进程、运行摘要 |
+| 媒体深爬 | 图片/视频/音频与 HLS 流获取，支持断点续爬 |
+| API 发现与处理 | 页面/API 分析、API 客户端分页、声明式数据清洗与 JSON/JSONL/CSV 输出 |
+| 验收与依赖 | `acceptance_suite.py` 真实站点验收基线；`ensure_web_fetch_dependencies.py` 一键检测/安装可选依赖 |
+| 合规边界 | 采集前确认授权，遵守 robots 与平台条款，凭据本地加密，默认限速并记录失败 |
+
+**依赖：** Python 3.8+；`smart_fetch.py` 可选 curl_cffi / cloudscraper / httpx，浏览器级能力可选 Patchright / nodriver / DrissionPage / FlareSolverr，可通过 `ensure_web_fetch_dependencies.py` 自动检测安装。
+
+完整命令参考：[anti-bot-web-scraper](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/anti-bot-web-scraper/SKILL.md)
 
 ---
 
@@ -328,6 +357,7 @@ flowchart TB
     end
     subgraph 网络采集
         SUB["scraper-unblocker<br/>合规网络采集"]
+        ABS["anti-bot-web-scraper<br/>自动反爬流水线"]
     end
     subgraph 漫剧视频
         MDV["manga-drama-video<br/>完整流水线"]
@@ -335,4 +365,4 @@ flowchart TB
     end
 ```
 
-八个技能均可独立安装。`multi-db-analyzer` 为纯 Python 实现，`java-superpowers-contract` 附带三语言工具链，`token-economizer` 为纯指令契约零依赖；`desktop-app-dev` 提供跨平台桌面交付、媒体与 Web 数据流水线模板，`mobile-app-dev` 提供跨平台移动应用打包与验证模板，`scraper-unblocker` 负责合规网络采集与媒体深爬，`manga-drama-video` 与 `manga-drama-video-helper` 负责 AI 漫剧视频制作。
+九个技能均可独立安装。`multi-db-analyzer` 为纯 Python 实现，`java-superpowers-contract` 附带三语言工具链，`token-economizer` 为纯指令契约零依赖；`desktop-app-dev` 提供跨平台桌面交付、媒体与 Web 数据流水线模板，`mobile-app-dev` 提供跨平台移动应用打包与验证模板，`scraper-unblocker` 负责常规合规网络采集与媒体深爬，`anti-bot-web-scraper` 负责 Cloudflare/WAF/Turnstile 等复杂反爬场景的自动多后端流水线，`manga-drama-video` 与 `manga-drama-video-helper` 负责 AI 漫剧视频制作。
