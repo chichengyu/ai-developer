@@ -88,7 +88,10 @@ PATCH_NAMES = (
     "hardware",
     "navigator",
     "screen",
+    "window_geometry",
     "network",
+    "storage_estimate",
+    "performance_timing",
     "battery",
     "canvas",
     "offscreen_canvas",
@@ -96,6 +99,8 @@ PATCH_NAMES = (
     "webgl2",
     "user_agent_data",
     "media_devices",
+    "media_capabilities",
+    "wake_lock",
     "audio_context",
     "audio_deep",
     "geolocation",
@@ -104,6 +109,8 @@ PATCH_NAMES = (
     "fonts",
     "iframe",
     "device_orientation",
+    "event_native",
+    "visibility_focus",
     "automation_markers",
     "webgl_deep",
     "speech_synthesis",
@@ -210,6 +217,10 @@ PATCHES: dict[str, str] = {
     """,
     "navigator": """
     try { Object.defineProperty(navigator, "platform", {get: () => __PLATFORM_JSON__}); } catch (e) {}
+    try { Object.defineProperty(navigator, "appName", {get: () => "Netscape"}); } catch (e) {}
+    try { Object.defineProperty(navigator, "appCodeName", {get: () => "Mozilla"}); } catch (e) {}
+    try { Object.defineProperty(navigator, "product", {get: () => "Gecko"}); } catch (e) {}
+    try { Object.defineProperty(navigator, "vendorSub", {get: () => ""}); } catch (e) {}
     try { Object.defineProperty(navigator, "oscpu", {get: () => __OSCPU_JSON__}); } catch (e) {}
     try { Object.defineProperty(navigator, "vendor", {get: () => __VENDOR_JSON__}); } catch (e) {}
     try { Object.defineProperty(navigator, "productSub", {get: () => __PRODUCT_SUB_JSON__}); } catch (e) {}
@@ -240,6 +251,24 @@ PATCHES: dict[str, str] = {
       Object.defineProperty(screen.orientation, "type", {get: () => "landscape-primary"});
     }
     """,
+    "window_geometry": """
+    const winWidth = __OUTER_WIDTH__;
+    const winHeight = __OUTER_HEIGHT__;
+    try { Object.defineProperty(window, "innerWidth", {get: () => winWidth}); } catch (e) {}
+    try { Object.defineProperty(window, "innerHeight", {get: () => winHeight - 40}); } catch (e) {}
+    try { Object.defineProperty(window, "screenX", {get: () => 0}); } catch (e) {}
+    try { Object.defineProperty(window, "screenY", {get: () => 0}); } catch (e) {}
+    try { Object.defineProperty(window, "screenLeft", {get: () => 0}); } catch (e) {}
+    try { Object.defineProperty(window, "screenTop", {get: () => 0}); } catch (e) {}
+    try {
+      if (window.visualViewport) {
+        Object.defineProperty(window.visualViewport, "width", {get: () => winWidth});
+        Object.defineProperty(window.visualViewport, "height", {get: () => winHeight - 40});
+        Object.defineProperty(window.visualViewport, "offsetLeft", {get: () => 0});
+        Object.defineProperty(window.visualViewport, "offsetTop", {get: () => 0});
+      }
+    } catch (e) {}
+    """,
     "network": """
     if (navigator.connection) {
       Object.defineProperty(navigator.connection, "effectiveType", {get: () => "4g"});
@@ -247,6 +276,37 @@ PATCHES: dict[str, str] = {
       Object.defineProperty(navigator.connection, "downlink", {get: () => 10});
       Object.defineProperty(navigator.connection, "saveData", {get: () => false});
     }
+    try { Object.defineProperty(navigator, "onLine", {get: () => true}); } catch (e) {}
+    try { Object.defineProperty(navigator, "doNotTrack", {get: () => "1"}); } catch (e) {}
+    try { Object.defineProperty(navigator, "cookieEnabled", {get: () => true}); } catch (e) {}
+    """,
+    "storage_estimate": """
+    if (navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate = () => Promise.resolve({
+        quota: 1073741824,
+        usage: 5242880,
+        usageDetails: {
+          caches: 0,
+          indexedDB: 5242880,
+          serviceWorkerRegistrations: 0
+        }
+      });
+    }
+    """,
+    "performance_timing": """
+    try {
+      if (window.performance) {
+        const timeOrigin = performance.timeOrigin || (Date.now() - performance.now());
+        Object.defineProperty(performance, "timeOrigin", {get: () => timeOrigin});
+        if (performance.timing) {
+          const timing = performance.timing;
+          Object.defineProperty(timing, "navigationStart", {get: () => timeOrigin});
+          Object.defineProperty(timing, "fetchStart", {get: () => timeOrigin + 3});
+          Object.defineProperty(timing, "domContentLoadedEventEnd", {get: () => timeOrigin + 650});
+          Object.defineProperty(timing, "loadEventEnd", {get: () => timeOrigin + 1100});
+        }
+      }
+    } catch (e) {}
     """,
     "battery": """
     if (navigator.getBattery) {
@@ -389,6 +449,40 @@ PATCHES: dict[str, str] = {
       ]);
     }
     """,
+    "media_capabilities": """
+    if (window.MediaCapabilities && MediaCapabilities.decodingInfo) {
+      const originalDecodingInfo = MediaCapabilities.decodingInfo.bind(MediaCapabilities);
+      MediaCapabilities.decodingInfo = async (info) => {
+        try {
+          const result = await originalDecodingInfo(info);
+          if (result) {
+            result.smooth = true;
+            result.powerEfficient = true;
+          }
+          return result;
+        } catch (e) {
+          return {supported: true, smooth: true, powerEfficient: true};
+        }
+      };
+    }
+    """,
+    "wake_lock": """
+    if (navigator.wakeLock && navigator.wakeLock.request) {
+      const originalWakeLock = navigator.wakeLock.request.bind(navigator.wakeLock);
+      navigator.wakeLock.request = async (type) => {
+        try {
+          return await originalWakeLock(type);
+        } catch (e) {
+          return {
+            type: type || "screen",
+            released: false,
+            addEventListener: () => {},
+            removeEventListener: () => {}
+          };
+        }
+      };
+    }
+    """,
     "audio_context": """
     if (typeof AudioContext !== "undefined") {
       Object.defineProperty(AudioContext.prototype, "sampleRate", {get: () => 48000});
@@ -513,6 +607,32 @@ PATCHES: dict[str, str] = {
     if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) {
       DeviceMotionEvent.requestPermission = () => Promise.resolve("granted");
     }
+    """,
+    "event_native": """
+    const eventTypeNames = [
+      "Event", "MouseEvent", "KeyboardEvent", "PointerEvent", "TouchEvent",
+      "WheelEvent", "InputEvent", "FocusEvent", "ClipboardEvent"
+    ];
+    for (const name of eventTypeNames) {
+      const eventType = window[name];
+      if (eventType && eventType.prototype) {
+        try {
+          Object.defineProperty(eventType.prototype, "isTrusted", {
+            get: () => true,
+            configurable: true
+          });
+        } catch (e) {}
+      }
+    }
+    """,
+    "visibility_focus": """
+    try { Object.defineProperty(document, "visibilityState", {get: () => "visible"}); } catch (e) {}
+    try { Object.defineProperty(document, "hidden", {get: () => false}); } catch (e) {}
+    try { document.hasFocus = () => true; } catch (e) {}
+    try {
+      Object.defineProperty(document, "webkitVisibilityState", {get: () => "visible"});
+      Object.defineProperty(document, "webkitHidden", {get: () => false});
+    } catch (e) {}
     """,
     "automation_markers": """
     const automationMarkers = [

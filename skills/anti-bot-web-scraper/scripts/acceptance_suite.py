@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
-import os
 import sys
 import threading
 import time
@@ -44,6 +43,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from bypass_engine import run_bypass  # noqa: E402
+from captcha_solver import build_captcha_provider  # noqa: E402
 from challenge_evolution import ChallengeVariant  # noqa: E402
 from challenge_replay import save_challenge_snapshot  # noqa: E402
 from fingerprint_binding import (  # noqa: E402
@@ -114,23 +114,7 @@ class TargetResult:
 
 
 def _captcha_solver(config: dict[str, Any] | None) -> Any | None:
-    captcha = dict(config or {})
-    provider = str(captcha.get("provider") or "2captcha").lower()
-    env_key = str(captcha.get("api_key_env") or "CAPTCHA_API_KEY")
-    api_key = os.environ.get(env_key) or captcha.get("api_key")
-    if not api_key:
-        return None
-    if provider in {"capsolver", "capsolver_solver"}:
-        from captcha_solver import CapSolverSolver
-
-        return CapSolverSolver(api_key)
-    if provider in {"anticaptcha", "anti-captcha"}:
-        from captcha_solver import AntiCaptchaSolver
-
-        return AntiCaptchaSolver(api_key)
-    from captcha_solver import CaptchaSolver
-
-    return CaptchaSolver(api_key, base_url=str(captcha.get("base_url") or "https://2captcha.com"))
+    return build_captcha_provider(config)
 
 
 def _captcha_balance(solver: Any | None) -> dict[str, Any]:
@@ -344,11 +328,12 @@ def _run_browser_target(
         headless_fallback=bool(browser.get("headless_fallback", True)),
         storage_state=browser.get("storage_state"),
         timeout_ms=float(browser.get("challenge_timeout", target.timeout * 1000)),
-        auto_install=bool(browser.get("auto_install", False)),
+        auto_install=bool(browser.get("auto_install", True)),
         max_attempts=target.max_attempts,
         retry_delay=float(browser.get("retry_delay", 2.0)),
         rotate_proxy_on_fail=bool(browser.get("rotate_proxy_on_fail", True)),
         fingerprint_binding=ctx.get("binding"),
+        max_engines_per_round=int(browser.get("max_engines_per_round", 3)),
     )
     text = result.html or ""
     details.update(

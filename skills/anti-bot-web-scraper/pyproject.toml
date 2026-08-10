@@ -27,7 +27,9 @@ browser = [
     "selenium",
 ]
 media = ["cryptography"]
-all = ["anti-bot-web-scraper[http,browser,media]"]
+ocr = ["pillow", "ddddocr"]
+ocr-tesseract = ["pillow", "pytesseract"]
+all = ["anti-bot-web-scraper[http,browser,media,ocr]"]
 
 [tool.ruff]
 line-length = 100

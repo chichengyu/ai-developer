@@ -16,6 +16,7 @@
 - [Dynamic anti-bot policy](#dynamic-anti-bot-policy)
 - [Vendor cookie validation and token injection](#vendor-cookie-validation-and-token-injection)
 - [Slider and audio CAPTCHAs](#slider-and-audio-captchas)
+- [No-key CAPTCHA mode](#no-key-captcha-mode)
 - [CAPTCHA queue](#captcha-queue)
 - [Challenge snapshots and replay](#challenge-snapshots-and-replay)
 - [Adaptive bypass orchestrator](#adaptive-bypass-orchestrator)
@@ -52,6 +53,7 @@ config.json
      seleniumbase / undetected_chromedriver / drission_page / selenium)
   -> page/API analysis
   -> rate-limited API fetching with cookies
+  -> automatic subpage parameter augmentation
   -> declarative data processing
   -> JSON / JSONL / CSV output
 ```
@@ -60,6 +62,7 @@ config.json
 
 ```json
 {
+  "mode": "auto",
   "pages": ["https://example.com/list"],
   "fetch": {"backend": "auto", "auto_install": true},
   "api": {"min_interval": 0.5, "max_retries": 3},
@@ -78,6 +81,11 @@ Run:
 ```powershell
 python scripts/web_data_pipeline.py --config config.json
 ```
+
+`mode` defaults to `"auto"`: it enables adaptive HTTP backends, a consistent
+Chrome 124 fingerprint binding, browser escalation on blocked pages, and
+no-key OCR. Set `"mode": "explicit"` to keep the previous non-normalized
+defaults.
 
 ## Adaptive fetch backends
 
@@ -173,6 +181,10 @@ Example:
 
 ## Stealth browser escalation
 
+`BrowserSession` auto-installs missing engine packages on first use and
+launches an installed Edge/Chrome executable when available, so the real
+browser binary already on the machine is reused.
+
 `stealth_browser.py` solves Managed Challenges / Turnstile with:
 
 - `patchright` -- undetected Playwright API
@@ -184,9 +196,16 @@ Example:
 - `drission_page` -- DrissionPage Chromium automation
 - `selenium` -- Selenium WebDriver with stealth injection
 
-`--engine auto` tries every installed engine in order. Each round can
-rotate proxy on failure and retries until `cf_clearance` or non-challenge
-content appears.
+`--engine auto` tries installed engines in priority order, even after one
+engine obtains a challenge cookie, because a cookie alone does not mean the
+page is clear. The engine budget defaults to `browser.max_engines_per_round:
+3`. Cookies from a pending round are injected into the next engine/round so a
+valid `cf_clearance` is not discarded. Each round can rotate proxy on failure
+and retries until `cf_clearance` or non-challenge content appears.
+
+When no explicit `fingerprint_binding` is set, `bypass_engine` rotates
+between consistent profiles (`chrome124` / `edge124`) on later rounds, so a
+blocked fingerprint gets a second real-browser identity before giving up.
 
 CLI:
 
@@ -199,8 +218,9 @@ CLI flags include `--url`, `--engine`, `--browser-path`, `--engine-order`,
 `--max-attempts`, `--retry-delay`, `--rotate-proxy-on-fail`,
 `--headless/--no-headless`, `--headless-fallback/--no-headless-fallback`,
 `--storage-state`, and `--check`. With `--engine auto` it tries each
-installed engine in order, rotates proxy on failure, and loops until a
-challenge cookie or non-challenge content appears.
+installed engine in order (up to `browser.max_engines_per_round`, default 3),
+rotates proxy on failure, and loops until a challenge cookie or
+non-challenge content appears.
 
 Pipeline config:
 
@@ -241,6 +261,30 @@ storage across patchright / camoufox runs so a solved clearance does not
 have to be re-earned for every deep-crawl page. Managed Challenge clicks
 use human-like mouse movement and fall back through visible checkbox
 labels, challenge buttons, Cloudflare iframes, and nested Shadow DOM.
+
+## Browser containers
+
+`BrowserSession` can run each task in an isolated browser container profile.
+Set `browser.container: true` to auto-create a temporary Chromium user-data
+directory that is removed when the session closes; set `container_dir` to
+keep a named container for reuse across runs.
+
+```json
+{
+  "browser": {
+    "enabled": true,
+    "container": true,
+    "container_dir": "state/containers/task-a",
+    "proxy": "http://user:pass@proxy.example:8080",
+    "fingerprint_binding": "chrome126"
+  }
+}
+```
+
+Containers isolate cookies, local storage, cache, and profile artifacts while
+the fingerprint binding and proxy pool keep each container's network identity
+coherent. This is the desktop-side equivalent of one browser instance per
+task/account without requiring Docker.
 
 ## Full-chain fingerprint binding
 
@@ -496,6 +540,27 @@ detection also recognizes Arkose / FunCaptcha, DataDome, PerimeterX, AWS
 WAF, and reCAPTCHA Enterprise. The 2captcha-style adapter gains
 `solve_funcaptcha()` and `solve_recaptcha_enterprise()`.
 
+## No-key CAPTCHA mode
+
+When no `api_key` or `api_key_env` is configured, the pipeline keeps working:
+
+- `captcha.ocr` defaults to `true`: local OCR auto-discovers installed
+  engines (`ddddocr`, `rapidocr_onnxruntime`, `easyocr`, `paddleocr`,
+  `cnocr`, `pytesseract`) and auto-installs the best one in priority order on
+  first use.
+- `captcha.ocr_priority` overrides the auto-install/discovery order.
+- Non-interactive Cloudflare / Turnstile widgets are still solved by browser
+  auto-click and token waiting; an empty provider is never passed to the
+  browser challenge handler.
+- `captcha.allow_manual_fallback: true` keeps the original manual mode.
+- `captcha.ocr: false` restores the old no-key behavior with no local OCR.
+- The run summary reports `captcha_mode` as `off`, `ocr`, `manual`, or
+  `provider`.
+
+```powershell
+python scripts/ensure_web_fetch_dependencies.py --ocr-only
+```
+
 ## CAPTCHA queue
 
 `captcha_queue.py` runs CAPTCHA provider calls through a worker pool with
@@ -527,6 +592,18 @@ The stealth patch bank now includes deeper fingerprint camouflage:
   `userAgentData`, `pdfViewerEnabled`) are skipped for Firefox / Safari
 - full `screen` geometry plus `userAgentData.getHighEntropyValues()` and
   `fullVersionList` coherence
+- consistent window geometry, `visualViewport`, `screenX/Y`, and inner size
+- native-looking `Event.isTrusted` for mouse, keyboard, pointer, touch, wheel,
+  input, focus, and clipboard events
+- visible/focused document state (`visibilityState`, `hidden`, `hasFocus`,
+  WebKit aliases)
+- `onLine`, `doNotTrack`, and `cookieEnabled` network/navigator signals
+- realistic `StorageManager.estimate()` quota/usage details
+- coherent `performance.timeOrigin` and navigation timing values
+- `MediaCapabilities.decodingInfo` and `navigator.wakeLock` browser-native
+  behavior fallbacks
+- `navigator.appName`, `appCodeName`, `product`, and `vendorSub` browser
+  identity coherence
 - browser launch flags that disable background networking, component
   updates, client-side phishing checks, sync, hang monitoring, mock
   keychain, and pin the profile timezone
@@ -767,6 +844,13 @@ when the page does not already look authenticated.
 - AES-128 / AES-256 key fetch and decrypt (requires `cryptography`)
 - segment download with `Range`/`BYTERANGE` support
 - optional combined `.ts` / fragmented `.mp4` output
+- `EXT-X-MEDIA` subtitle rendition discovery and download
+- clear errors for unsupported `SAMPLE-AES` sample encryption
+- per-segment retry with exponential backoff and resume from existing segment
+  files (`resumed_segments` is reported in the result summary)
+- low-latency HLS parsing: `EXT-X-PART`, `EXT-X-PRELOAD-HINT`, `EXT-X-SKIP`,
+  `EXT-X-SERVER-CONTROL`, `EXT-X-PART-INF`, `EXT-X-DATERANGE`,
+  `EXT-X-PROGRAM-DATE-TIME`, and `EXT-X-I-FRAME-STREAM-INF`
 
 CLI:
 
@@ -786,21 +870,70 @@ Pipeline config:
     "max_bandwidth": 8000000,
     "include_segments": true,
     "combine": true,
-    "decrypt": true
+    "decrypt": true,
+    "download_assets": true,
+    "max_assets": 200
   }
 }
 ```
 
 `BrowserSession` captures HLS requests from runtime network traffic, and
 `PageCapture.hls_urls()` also returns HLS URLs found in HTML and embedded
-JSON. The pipeline downloads every discovered `m3u8` stream.
+JSON. The pipeline downloads every discovered `m3u8` stream, plus discovered
+image/audio/video/CSS/JS/font/subtitle/data/document assets when
+`download_assets` is enabled. Summaries report `asset_downloads` and
+`asset_errors`.
+
+## DASH acquisition
+
+`dash_client.py` adds static DASH MPD support:
+
+- MPD parsing for `SegmentTemplate`, `SegmentTimeline`, `SegmentList`, and
+  `SegmentBase` (single-file streams with `indexRange` / `Initialization
+  range`)
+- representation selection by preferred height or max bandwidth
+- initialization segment and media segment download
+- optional combined `.mp4` / binary output
+- per-segment retry with exponential backoff and resume from existing segment
+  files (`resumed_segments` is reported in the result summary)
+- CENC/DRM streams are reported as unsupported instead of corrupting output
+
+```powershell
+python scripts/dash_client.py --url "https://example.com/manifest.mpd" --output data/media --height 1080
+```
+
+`.mpd` URLs are classified as `dash` media by the HTML/JSON extractors and
+downloaded automatically by `media_crawler.py`.
+
+## Smooth Streaming and file metadata
+
+- `parse_smooth_manifest()` parses Microsoft Smooth Streaming XML manifests,
+  including stream indexes, quality levels, and chunk timelines.
+- `.ism/Manifest` and `format=mp4` manifest URLs are classified as `smooth`
+  media by HTML/JSON extractors.
+- `media_metadata.py` sniffs MP4/M4A/TS/WebM/Matroska/MP3/FLAC/OGG/WAV/AVI/FLV
+  containers by magic bytes, parses MP4 `mvhd` duration, and reads
+  WebVTT/SRT/ASS cue counts plus PNG/JPEG/GIF dimensions.
+- `ffprobe` is used automatically when installed for richer duration and
+  stream metadata.
+- `resource_downloader.py` attaches this metadata to every downloaded file in
+  `details.metadata`, and CSS/JS downloads also include
+  `details.nested_assets` parsed from `url()`, `@import`, `import`,
+  `require`, and `new URL()`.
 
 ## Concurrent media crawl and resume
 
 `media_crawler.py` is a standalone resumable crawler:
 
-- extracts image / video / audio / HLS from HTML and embedded JSON
-- accepts direct image/video/audio/HLS URL seeds and downloads them directly
+- extracts image / video / audio / HLS / DASH / Smooth / subtitles / CSS /
+  JS / fonts / data files / documents from HTML and JSON
+- accepts direct URL seeds for all of those kinds and downloads them
+
+The default `media_types` now includes `image`, `video`, `audio`, `hls`,
+`dash`, `smooth`, `subtitle`, `file`, `css`, `js`, `font`, and `data`.
+CSS/JS nested assets are recursively discovered and downloaded: a CSS
+`url(...)` image or `@import` file is added back into the crawl queue and
+fetched with the same metadata pipeline.
 - follows same-host links, robots.txt, and sitemaps
 - uses thread pools for pages and media with global rate limits
 - retries with exponential backoff and rotates proxies on failure
@@ -872,7 +1005,9 @@ uses those signals to rotate proxy, retry, or launch a stealth browser.
 - structure signature changes trigger automatic DOM reparse
 - dynamic rendering through the stealth browser loop when blocked
 - proxy pool rotation with exponential backoff
-- JSONL output for every page, record, media URL, block, and error
+- JSONL output for every page, record, media URL (HLS/DASH/Smooth/image/audio/
+  video), asset (CSS/JS/font/data/document), WS/SSE stream, DOM/JS event,
+  block, and error
 
 ```json
 {
@@ -995,6 +1130,195 @@ python scripts/deep_crawler.py --seed "https://example.com/list" --max-depth 2 -
 It honors robots.txt, same-host filtering, include/exclude patterns, rate
 limits, and blocked-page skipping.
 
+Every visited page now records its full media/file inventory in `page.media`:
+HLS, DASH MPD, Smooth Streaming, video/audio/image URLs, subtitle files, and
+common document/archive files. Crawl summaries include `media_urls`, `files`,
+and `subtitles` counts, so whole-site asset discovery is part of the crawl
+result rather than a separate pass.
+
+`page.assets` additionally records CSS, JavaScript, fonts, icon images, data
+files (JSON/XML/CSV), and document links. Summary counts include `assets`,
+`css`, and `js`.
+
+Set `url_store_path` to persist every discovered page/media/asset/stream URL
+into a SQLite deduplicator; crawl summaries then report `url_store_seen`.
+Set `jsonl_path` to append every analyzed page as one JSON line immediately
+after it is crawled; robots-denied, fetch-error, and blocked pages are also
+written so the JSONL is a complete crawl log. Summaries report `jsonl_lines`,
+and interrupted crawls keep all already-written page records on disk.
+
+With `crawl_api_endpoints: true`, the crawler also fetches every GET API
+endpoint found on a page, records its JSON response, and discovers API-like
+URLs inside that JSON (`next_url`, `url`, `api`, `endpoint`, `link`). Newly
+found endpoints are appended to the page's API list and fetched too, so API
+responses participate in whole-site discovery instead of waiting for a later
+fetch pass.
+
+```json
+{
+  "subpages": {
+    "enabled": true,
+    "seeds": ["https://example.com/list"],
+    "crawl_api_endpoints": true,
+    "max_api_calls": 200
+  }
+}
+```
+
+## One-URL full-site crawl
+
+Give the pipeline a single URL and it automatically builds the full-site job:
+deep-crawl all reachable pages/subpages, discover APIs, events, WebSockets,
+SSE streams, auto-fill parameters, write the whole-site API index, and save
+the processed records.
+
+```powershell
+python scripts/web_data_pipeline.py --url "https://example.com" --max-depth 3 --max-pages 200 --crawl-api --site-index state/site-api-index.json --output data/site.json
+```
+
+`--crawl-api` also makes the crawler fetch discovered API endpoints during the
+crawl and recursively follow API URLs found inside JSON responses.
+
+For JS-heavy sites, add browser rendering and runtime discovery:
+
+```powershell
+python scripts/web_data_pipeline.py --url "https://example.com" --browser --trigger-events --capture-storage --crawl-api --site-index state/site-api-index.json --output data/site.json
+```
+
+`--browser` renders each page with a stealth browser and captures runtime
+network/API traffic. `--trigger-events` clicks/triggers inline event handlers
+so event-driven APIs appear in the capture. `--capture-storage` records
+localStorage/sessionStorage and feeds those values back into the parameter
+bank.
+
+Blocked pages are not skipped by default. The crawler keeps them in the
+output, applies request-level block retries, waits with backoff, rotates the
+pinned proxy, and switches the adaptive HTTP backend before escalating to
+`alternate_access` / browser fallback. Recovery attempts are recorded per page
+as `recovery`, and the summary reports `block_recoveries` and
+`recovered_pages`. Tune recovery with `--block-retries`,
+`--block-retry-delay`, `--block-retry-backoff`, `--no-proxy-rotate`, and
+`--no-retry-on-block`. Alternate URL/UA fallback is enabled by default and can
+be disabled with `--no-alternate`. API requests apply the same block recovery
+at `ApiClient` level: blocked responses sleep with backoff, rotate the pinned
+proxy, and switch the adaptive backend before returning an error. A stealth
+browser fallback can be enabled with `--browser-fallback`.
+
+## Multi-site parallel crawl
+
+`multi_site_pipeline.py` runs one isolated full-site job per URL and executes
+them concurrently. Each site gets its own output directory, processed records,
+summary report, and optional whole-site API index. A combined report aggregates
+pages, crawl pages, API specs, stream specs, and processed records.
+
+```powershell
+python scripts/multi_site_pipeline.py --url "https://a.example" --url "https://b.example" --workers 4 --crawl-api --browser --trigger-events --capture-storage --site-index --output-dir state/multi-site --combined-output state/multi-site/combined.json
+```
+
+`--config base.json` merges a common JSON config into every job (for shared
+headers, proxy pools, login state, or processing rules). A failing site is
+reported in the combined output without stopping the other jobs.
+
+Risk control is on by default: every site uses a conservative request
+interval with jitter, exponential backoff, robots.txt checks, blocked-page
+skipping, and per-site limits. Tune it with `--min-interval`, `--jitter`,
+`--max-retries`, `--backoff-base`, `--backoff-max`, and `--no-robots`. The
+combined report includes `blocked_pages`, `api_blocks`, `errors`, and
+`robots_skipped` so a risk-control incident is visible in the summary.
+
+Whole-site job failures also retry: `--site-retries` (default 1),
+`--site-retry-delay` (default 5s), and `--site-retry-backoff` (default 2x)
+control how a failed site is retried. By default a site that completed but
+had blocked pages is not retried; pass `--retry-on-blocked` only when you have
+confirmed the block is transient and you are allowed to retry. The combined
+report includes `site_retries`, `block_recoveries`, and `recovered_pages`.
+Per-page block recovery is enabled through `--block-retries` and rotates
+proxies/backends before a page is considered blocked.
+
+## Subpage API parameter augmentation
+
+`param_augmenter.py` automatically harvests parameter names and values from
+every crawled subpage and expands discovered API specs into concrete fetch
+variants. Sources include page URL query strings, subpage links, API endpoint
+query strings, media/stream URL query strings, network response bodies,
+WebSocket/SSE frame data, form fields, embedded JSON scalar state, and
+pagination signals. A page that calls `/api/sub-data?id=1` while another subpage calls
+the same endpoint with `id=2` will produce both fetch variants automatically.
+Concrete path APIs such as `/api/items/1` and `/api/items/2` are grouped into
+a path template (`/api/items/{id}`) and expanded across the whole site, so
+path-style interfaces are covered as well.
+
+```json
+{
+  "subpages": {
+    "enabled": true,
+    "seeds": ["https://example.com/list"],
+    "max_depth": 2,
+    "max_pages": 100
+  },
+  "api": {
+    "auto_augment_params": true,
+    "site_index_output": "state/site-api-index.json",
+    "augment": {
+      "max_variants": 200,
+      "max_values_per_param": 10,
+      "infer_path_templates": true,
+      "max_templates": 20,
+      "scope": "related_then_global",
+      "include_pagination": false,
+      "exclude_keys": ["token", "signature"],
+      "param_map": [
+        {
+          "match": "/api/items/",
+          "params": {"category": ["books", "movies"]}
+        }
+      ]
+    }
+  }
+}
+```
+
+Run the augmenter standalone on an existing crawl and spec manifest:
+
+```powershell
+python scripts/param_augmenter.py --specs specs.json --pages crawl.json --config augment.json --output augmented-specs.json
+python scripts/param_augmenter.py --pages crawl.json --config augment.json --site-index site-api-index.json
+```
+
+`augment_variants`, `augment_param_keys`, and `augment_harvested_values` are
+reported in the pipeline summary for verification.
+
+`site_index_output` writes a whole-site API index with every page, subpage,
+endpoint, page-to-endpoint mapping, aggregated parameter bank, and inferred
+path templates. The summary also reports `site_pages`, `site_endpoints`,
+`site_templates`, and `site_param_keys`.
+
+## Response-driven parameter chaining
+
+When `api.chain.enabled` is true, fetched JSON responses are parsed back into
+the parameter bank. IDs, slugs, category keys, and other scalar values from
+one API become query/path parameters for the next fetch round, so a list API
+can automatically drive every detail API without manual joins. API-like URL
+fields inside responses (`next_url`, `url`, `api`, `endpoint`, `link`) are
+discovered as new specs and fetched in the next round as well.
+
+```json
+{
+  "api": {
+    "auto_augment_params": true,
+    "chain": {
+      "enabled": true,
+      "max_rounds": 3,
+      "max_specs_per_round": 50
+    }
+  }
+}
+```
+
+The pipeline summary reports `chain_rounds` and `chain_new_specs`. Each round
+is deduplicated against every previously fetched spec, and the loop stops
+when no new parameterized spec is produced.
+
 ## Page/API analysis
 
 `page_data_parser.py` extracts:
@@ -1002,6 +1326,13 @@ limits, and blocked-page skipping.
 - metadata and OpenGraph
 - JSON-LD and embedded JSON
 - API endpoints from fetch / XHR / forms / scripts
+- POST request bodies from `fetch` / axios / jQuery / HTTP clients
+- axios `params` objects and `axios.request({...})` configs
+- GraphQL query/mutation operations and their variables
+- WebSocket endpoints and JSON `send()` payloads
+- EventSource / SSE endpoints and `text/event-stream` content types
+- HTML `on*` event handlers and JS `addEventListener` / `.on()` bindings with
+  nearby handler URLs
 - pagination fields
 - CAPTCHA challenges
 
@@ -1021,6 +1352,11 @@ python scripts/api_analyzer.py --input capture.json --output manifest.json
 - exponential backoff
 - adaptive throttle
 - page / offset / cursor pagination
+
+API requests use a separate header fingerprint from page loads:
+`Accept: application/json`, `Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`,
+and `Sec-Fetch-Site: same-origin`, without the document-only
+`Sec-Fetch-User` / `Upgrade-Insecure-Requests` headers.
 
 ```json
 {
@@ -1044,6 +1380,35 @@ python scripts/api_analyzer.py --input capture.json --output manifest.json
 }
 ```
 
+## Real-time event capture
+
+`page_data_parser.py` discovers WebSocket (`WS`) and EventSource / SSE
+endpoints from page scripts. WebSocket `send(JSON.stringify({...}))` payloads
+are parsed and attached to the endpoint as request bodies, so room IDs,
+topics, and event parameters are available for later use.
+
+`BrowserSession` network capture also listens to WebSocket frames:
+
+- `framesent` and `framereceived` are recorded with parsed JSON `frame_data`
+- every frame has a `direction` (`sent` / `received`)
+- `text/event-stream` responses are parsed into discrete SSE entries with
+  `frame_data.event`, `frame_data.data`, `frame_data.id`, and `direction:
+  received`
+
+DeepCrawler records `page.streams` (WS/SSE endpoints) and `page.events`
+(DOM/JS event handlers) per page; crawl summaries include `streams` and
+`events` counts.
+
+Stream specs are reported separately as `stream_specs` in the pipeline summary
+and are excluded from plain HTTP `ApiClient` fetching, since they require a
+persistent socket rather than a request/response call.
+
+With `browser.trigger_events` enabled, `BrowserSession` also triggers inline
+`onclick` / `onchange` / `oninput` / form submit handlers and keeps the
+resulting network traffic in the same capture. With
+`browser.capture_storage` enabled, localStorage/sessionStorage values are
+recorded and fed into the parameter bank for automatic API parameter fill.
+
 ## Data processing
 
 `data_processor.py` supports `select`, `rename`, `filter`, `sort`, `dedupe`,
@@ -1059,6 +1424,7 @@ python scripts/ensure_web_fetch_dependencies.py           # auto install
 python scripts/ensure_web_fetch_dependencies.py --check   # report only
 python scripts/ensure_web_fetch_dependencies.py --http-only
 python scripts/ensure_web_fetch_dependencies.py --browser-only
+python scripts/ensure_web_fetch_dependencies.py --ocr-only
 ```
 
 Or install the declared optional groups from `pyproject.toml`:
@@ -1070,7 +1436,8 @@ pip install -e ".[http,browser]"
 The full optional stack now includes `curl_cffi`, `tls_client`,
 `cloudscraper`, `httpx`, `h2`, `patchright`, `camoufox`, `scrapling`,
 `nodriver`, `seleniumbase`, `undetected_chromedriver`, `DrissionPage`,
-`selenium`, and `cryptography` for encrypted HLS. Auto mode in
+`selenium`, `cryptography` for encrypted HLS, and `pillow` / `ddddocr` for
+local OCR. Auto mode in
 `smart_fetch.py` and `stealth_browser.py` defaults to `auto_install: true`,
 so missing packages are installed on first use.
 
@@ -1091,9 +1458,12 @@ so missing packages are installed on first use.
 - `nopecha_probe.py` -- real public IP and nopecha Cloudflare demo verdict
 - `login_detector.py` -- login form/state auto-detection
 - `hls_client.py` -- HLS resolve/download/combine client
+- `dash_client.py` -- DASH MPD resolve/download/combine client
+- `media_metadata.py` -- container sniffing / MP4 duration / subtitle parsing
 - `media_crawler.py` -- concurrent resumable media crawl
 - `media_session.py` -- rate-limited media HTTP session
 - `media_parser.py` -- page/media parsing helpers
+- `param_augmenter.py` -- subpage API parameter auto-fill and variant expansion
 - `block_diagnoser.py` -- status/header/Cloudflare/robots block diagnosis
 - `stealth_patches.py` -- reusable Playwright/Selenium stealth patches
 - `autonomous_crawler.py` -- asyncio million-scale autonomous crawl
@@ -1120,6 +1490,7 @@ so missing packages are installed on first use.
 - `current_ip.py` -- STUN/HTTP public IP diagnostics
 - `data_processor.py` -- declarative data shaping
 - `web_data_pipeline.py` -- pipeline orchestrator
+- `multi_site_pipeline.py` -- parallel multi-site full-site crawler
 - `acceptance_suite.py` -- real-site acceptance baseline runner
 - `run_summary.py` -- end-of-run save paths and resource status report
 - `adaptive_policy.py` -- per-target dynamic strategy memory

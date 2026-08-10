@@ -14,7 +14,9 @@ third-party service without a manual UI dialog.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
+import os
 import re
 import tempfile
 import threading
@@ -669,6 +671,15 @@ class AutoCaptchaSolver:
         self.allow_manual_fallback = allow_manual_fallback
         self.manual_solver = manual_solver
         self.ocr_solver = ocr_solver
+        self.last_errors: list[tuple[int, str]] = []
+
+    @property
+    def has_service(self) -> bool:
+        """Return True when the wrapped provider has a usable API key."""
+        key = getattr(self.solver, "api_key", None)
+        if key:
+            return True
+        return bool(getattr(self.solver, "providers", None))
 
     def solve_challenge(
         self,
@@ -704,8 +715,10 @@ class AutoCaptchaSolver:
         challenges: list[CaptchaChallenge],
         image_paths: list[str | Path] | None = None,
         max_challenges: int | None = None,
+        continue_on_error: bool = False,
     ) -> list[tuple[CaptchaChallenge, str]]:
         solved: list[tuple[CaptchaChallenge, str]] = []
+        self.last_errors = []
         image_index = 0
         for index, challenge in enumerate(challenges):
             if max_challenges is not None and index >= max_challenges:
@@ -715,7 +728,14 @@ class AutoCaptchaSolver:
                 if image_index < len(image_paths):
                     image_path = image_paths[image_index]
                 image_index += 1
-            solved.append((challenge, self.solve_challenge(challenge, image_path=image_path)))
+            try:
+                solved.append(
+                    (challenge, self.solve_challenge(challenge, image_path=image_path))
+                )
+            except CaptchaError as exc:
+                self.last_errors.append((index, str(exc)))
+                if not continue_on_error:
+                    raise
         return solved
 
     def _solve_with_service(
@@ -723,6 +743,8 @@ class AutoCaptchaSolver:
         challenge: CaptchaChallenge,
         image_path: str | Path | None,
     ) -> str:
+        if not self.has_service:
+            raise CaptchaError("no CAPTCHA provider API key configured")
         page_url = challenge.page_url or ""
         if challenge.kind == "image":
             path = image_path
@@ -822,8 +844,33 @@ def preprocess_captcha_image(
     return output
 
 
+OCR_LIBRARY_PRIORITY = (
+    "ddddocr",
+    "rapidocr_onnxruntime",
+    "easyocr",
+    "paddleocr",
+    "cnocr",
+    "pytesseract",
+)
+OCR_LIBRARY_PACKAGES = {
+    "ddddocr": ("pillow", "ddddocr"),
+    "rapidocr_onnxruntime": ("rapidocr_onnxruntime",),
+    "easyocr": ("easyocr",),
+    "paddleocr": ("paddleocr",),
+    "cnocr": ("cnocr",),
+    "pytesseract": ("pillow", "pytesseract"),
+}
+OCR_LIBRARY_ALIASES = {
+    "tesseract": "pytesseract",
+    "rapidocr": "rapidocr_onnxruntime",
+    "paddle": "paddleocr",
+    "easy": "easyocr",
+    "cn": "cnocr",
+}
+
+
 class OcrCaptchaSolver:
-    """Local OCR adapter that uses optional Pillow + pytesseract."""
+    """Auto-discover and use the strongest installed/installable OCR library."""
 
     def __init__(
         self,
@@ -834,6 +881,9 @@ class OcrCaptchaSolver:
         denoise: bool = True,
         scale: int = 2,
         language: str | None = None,
+        backend: str = "auto",
+        auto_install: bool = True,
+        priority: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.tesseract_cmd = tesseract_cmd
         self.psm = psm
@@ -842,17 +892,120 @@ class OcrCaptchaSolver:
         self.denoise = denoise
         self.scale = scale
         self.language = language
+        self.backend = backend
+        self.auto_install = auto_install
+        self.priority = tuple(priority) if priority else OCR_LIBRARY_PRIORITY
+        self._ddddocr: Any | None = None
+        self._rapidocr: Any | None = None
+        self._easyocr: Any | None = None
+        self._paddleocr: Any | None = None
+        self._cnocr: Any | None = None
+        self._install_attempted = False
 
     @property
     def available(self) -> bool:
+        return self._backend() is not None
+
+    def _selected_backend(self) -> str | None:
+        selected = str(self.backend or "auto").strip().lower()
+        if selected in {"", "auto", "adaptive", "smart"}:
+            return None
+        return OCR_LIBRARY_ALIASES.get(selected, selected)
+
+    def _available(self, library: str) -> bool:
+        module_names = {
+            "ddddocr": "ddddocr",
+            "rapidocr_onnxruntime": "rapidocr_onnxruntime",
+            "easyocr": "easyocr",
+            "paddleocr": "paddleocr",
+            "cnocr": "cnocr",
+            "pytesseract": "pytesseract",
+        }
         try:
-            import PIL  # noqa: F401
-            import pytesseract  # noqa: F401
-        except ImportError:
+            importlib.import_module(module_names[library])
+            if library == "pytesseract":
+                importlib.import_module("PIL")
+        except (ImportError, KeyError):
             return False
         return True
 
+    def _backend(self) -> str | None:
+        selected = self._selected_backend()
+        if selected is not None:
+            return selected if self._available(selected) else None
+        for library in self.priority:
+            if self._available(library):
+                return library
+        return None
+
+    def _install_missing(self) -> None:
+        from ensure_web_fetch_dependencies import ensure
+
+        selected = self._selected_backend()
+        candidates = [selected] if selected is not None else list(self.priority)
+        last_error: Exception | None = None
+        for library in candidates:
+            packages = OCR_LIBRARY_PACKAGES.get(library)
+            if not packages:
+                continue
+            try:
+                ensure(install=True, packages=packages)
+            except Exception as exc:
+                last_error = exc
+                continue
+            if self._available(library):
+                return
+        if last_error is not None:
+            raise CaptchaError(f"local OCR auto-install failed: {last_error}")
+        raise CaptchaError("local OCR libraries are unavailable after auto-install")
+
     def solve_image(self, image_path: str | Path) -> CaptchaResult:
+        path = Path(image_path)
+        if not path.exists():
+            raise CaptchaError(f"captcha image not found: {path}")
+        backend = self._backend()
+        if backend is None and self.auto_install and not self._install_attempted:
+            self._install_attempted = True
+            self._install_missing()
+            backend = self._backend()
+        if backend is None:
+            raise CaptchaError(
+                "no usable local OCR library; install one with "
+                "ensure_web_fetch_dependencies.py --ocr-only"
+            )
+        if backend == "ddddocr":
+            return self._solve_ddddocr(path)
+        if backend == "pytesseract":
+            return self._solve_pytesseract(path)
+        if backend == "rapidocr_onnxruntime":
+            return self._solve_rapidocr(path)
+        if backend == "easyocr":
+            return self._solve_easyocr(path)
+        if backend == "paddleocr":
+            return self._solve_paddleocr(path)
+        if backend == "cnocr":
+            return self._solve_cnocr(path)
+        raise CaptchaError(f"unsupported OCR backend: {backend}")
+
+    def _answer(self, text: str) -> CaptchaResult:
+        text = str(text or "").strip()
+        if not text:
+            raise CaptchaError("local OCR returned an empty answer")
+        return CaptchaResult(success=True, task_id="local-ocr", answer=text, raw=text)
+
+    def _solve_ddddocr(self, path: Path) -> CaptchaResult:
+        import ddddocr
+
+        if self._ddddocr is None:
+            try:
+                self._ddddocr = ddddocr.DdddOcr(show_ad=False)
+            except TypeError:
+                self._ddddocr = ddddocr.DdddOcr()
+        with path.open("rb") as handle:
+            text = self._ddddocr.classification(handle.read()).strip()
+        return self._answer(text)
+
+    def _solve_pytesseract(self, path: Path) -> CaptchaResult:
         try:
             import pytesseract
             from PIL import Image
@@ -860,9 +1013,6 @@ class OcrCaptchaSolver:
             raise CaptchaError(
                 "local OCR requires Pillow and pytesseract; pass api_key or install them"
             ) from exc
-        path = Path(image_path)
-        if not path.exists():
-            raise CaptchaError(f"captcha image not found: {path}")
         if self.tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
         config = f"--psm {int(self.psm)}"
@@ -883,9 +1033,53 @@ class OcrCaptchaSolver:
             config=config,
             lang=self.language,
         ).strip()
-        if not text:
-            raise CaptchaError("local OCR returned an empty answer")
-        return CaptchaResult(success=True, task_id="local-ocr", answer=text, raw=text)
+        return self._answer(text)
+
+    def _solve_rapidocr(self, path: Path) -> CaptchaResult:
+        import rapidocr_onnxruntime
+
+        if self._rapidocr is None:
+            self._rapidocr = rapidocr_onnxruntime.RapidOCR()
+        result, _ = self._rapidocr(str(path))
+        text = "".join(str(item[1]) for item in (result or [])).strip()
+        return self._answer(text)
+
+    def _solve_easyocr(self, path: Path) -> CaptchaResult:
+        import easyocr
+
+        if self._easyocr is None:
+            self._easyocr = easyocr.Reader(["ch_sim", "en"], gpu=False)
+        result = self._easyocr.readtext(str(path), detail=0, paragraph=True)
+        text = "".join(str(item) for item in (result or [])).strip()
+        return self._answer(text)
+
+    def _solve_paddleocr(self, path: Path) -> CaptchaResult:
+        from paddleocr import PaddleOCR
+
+        if self._paddleocr is None:
+            self._paddleocr = PaddleOCR(
+                use_angle_cls=True,
+                lang="ch",
+                show_log=False,
+            )
+        result = self._paddleocr.ocr(str(path), cls=True)
+        parts: list[str] = []
+        for page in result or []:
+            for line in page or []:
+                if isinstance(line, dict):
+                    parts.append(str(line.get("text", "")))
+                elif isinstance(line, list | tuple) and len(line) >= 2:
+                    parts.append(str(line[1][0]))
+        return self._answer("".join(parts))
+
+    def _solve_cnocr(self, path: Path) -> CaptchaResult:
+        from cnocr import CnOcr
+
+        if self._cnocr is None:
+            self._cnocr = CnOcr()
+        result = self._cnocr.ocr(str(path))
+        text = "".join(item.get("text", "") for item in (result or [])).strip()
+        return self._answer(text)
 
 
 class ManualCaptchaSolver:
@@ -1244,6 +1438,30 @@ class AntiCaptchaSolver(_JsonTaskProvider):
             },
             ("text",),
         )
+
+
+def build_captcha_provider(config: dict[str, Any] | None = None) -> Any | None:
+    """Build the configured third-party CAPTCHA provider or return None."""
+    captcha = dict(config or {})
+    provider = str(captcha.get("provider") or "2captcha").lower()
+    env_key = str(captcha.get("api_key_env") or "CAPTCHA_API_KEY")
+    api_key = os.environ.get(env_key) or captcha.get("api_key")
+    if not api_key:
+        return None
+    if provider in {"capsolver", "capsolver_solver"}:
+        return CapSolverSolver(
+            api_key,
+            base_url=str(captcha.get("base_url") or "https://api.capsolver.com"),
+        )
+    if provider in {"anticaptcha", "anti-captcha"}:
+        return AntiCaptchaSolver(
+            api_key,
+            base_url=str(captcha.get("base_url") or "https://api.anti-captcha.com"),
+        )
+    return CaptchaSolver(
+        api_key,
+        base_url=str(captcha.get("base_url") or "https://2captcha.com"),
+    )
 
 
 def _b64encode_file(path: Path) -> str:

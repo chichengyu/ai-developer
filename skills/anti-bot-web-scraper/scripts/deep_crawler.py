@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
+import time
 import urllib.error
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -27,8 +29,57 @@ from proxy_pool import ProxyPool
 from scrape_guard import RobotsPolicy
 from security_detector import SecurityReport, detect_security_mechanisms
 from smart_fetch import create_fetch_session
+from url_store import UrlDeduplicator
 
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif", ".ico"}
+_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".flv", ".ts", ".m4v", ".wmv", ".mpd", ".ism"}
+_AUDIO_EXTS = {".mp3", ".aac", ".m4a", ".wav", ".flac", ".ogg", ".opus", ".wma"}
+_SUBTITLE_EXTS = {".vtt", ".srt", ".ass", ".ssa"}
+_FILE_EXTS = {
+    ".pdf",
+    ".zip",
+    ".rar",
+    ".7z",
+    ".tar",
+    ".gz",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".csv",
+    ".json",
+    ".xml",
+    ".txt",
+    ".epub",
+    ".mobi",
+}
+
+
+def _classify_asset_url(url: str) -> str | None:
+    lower = url.lower()
+    if ".m3u8" in lower:
+        return "hls"
+    if ".mpd" in lower or "format=mpd" in lower:
+        return "dash"
+    if ".ism/manifest" in lower or (
+        "manifest" in lower and "format=mp4" in lower
+    ):
+        return "smooth"
+    suffix = Path(urllib.parse.urlsplit(url).path).suffix.lower()
+    if suffix in _IMAGE_EXTS:
+        return "image"
+    if suffix in _VIDEO_EXTS:
+        return "video"
+    if suffix in _AUDIO_EXTS:
+        return "audio"
+    if suffix in _SUBTITLE_EXTS:
+        return "subtitle"
+    if suffix in _FILE_EXTS:
+        return "file"
+    return None
 
 
 @dataclass
@@ -59,6 +110,17 @@ class CrawlConfig:
     fetch_backend: str = "standard"
     fetch_auto_install: bool | None = None
     fetch_browser: dict[str, Any] | None = None
+    collect_param_hints: bool = True
+    max_param_hints: int = 200
+    crawl_api_endpoints: bool = False
+    max_api_calls: int = 100
+    api_max_payload_bytes: int = 262144
+    block_retries: int = 2
+    block_retry_delay: float = 2.0
+    block_retry_backoff: float = 2.0
+    rotate_proxy_on_block: bool = True
+    alternate_on_block: bool = True
+    browser_on_block: bool = False
     extension_skip: tuple[str, ...] = (
         ".jpg",
         ".jpeg",
@@ -93,6 +155,8 @@ class CrawlConfig:
         ".apk",
         ".ipa",
     )
+    url_store_path: str | None = None
+    jsonl_path: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> CrawlConfig:
@@ -122,6 +186,19 @@ class CrawlConfig:
             fetch_backend=str(values.get("fetch_backend") or "standard"),
             fetch_auto_install=values.get("fetch_auto_install"),
             fetch_browser=dict(values["fetch_browser"]) if values.get("fetch_browser") else None,
+            collect_param_hints=bool(values.get("collect_param_hints", True)),
+            max_param_hints=int(values.get("max_param_hints", 200)),
+            crawl_api_endpoints=bool(values.get("crawl_api_endpoints", False)),
+            max_api_calls=int(values.get("max_api_calls", 100)),
+            api_max_payload_bytes=int(values.get("api_max_payload_bytes", 262144)),
+            block_retries=int(values.get("block_retries", 2)),
+            block_retry_delay=float(values.get("block_retry_delay", 2.0)),
+            block_retry_backoff=float(values.get("block_retry_backoff", 2.0)),
+            rotate_proxy_on_block=bool(values.get("rotate_proxy_on_block", True)),
+            alternate_on_block=bool(values.get("alternate_on_block", True)),
+            browser_on_block=bool(values.get("browser_on_block", False)),
+            url_store_path=values.get("url_store_path"),
+            jsonl_path=values.get("jsonl_path"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,7 +225,20 @@ class CrawlConfig:
             "fetch_backend": self.fetch_backend,
             "fetch_auto_install": self.fetch_auto_install,
             "fetch_browser": self.fetch_browser,
+            "collect_param_hints": self.collect_param_hints,
+            "max_param_hints": self.max_param_hints,
+            "crawl_api_endpoints": self.crawl_api_endpoints,
+            "max_api_calls": self.max_api_calls,
+            "api_max_payload_bytes": self.api_max_payload_bytes,
+            "block_retries": self.block_retries,
+            "block_retry_delay": self.block_retry_delay,
+            "block_retry_backoff": self.block_retry_backoff,
+            "rotate_proxy_on_block": self.rotate_proxy_on_block,
+            "alternate_on_block": self.alternate_on_block,
+            "browser_on_block": self.browser_on_block,
             "extension_skip": list(self.extension_skip),
+            "url_store_path": self.url_store_path,
+            "jsonl_path": self.jsonl_path,
         }
 
 
@@ -176,7 +266,14 @@ class CrawlPage:
     analysis: PageDataAnalysis | None = None
     links: list[str] = field(default_factory=list)
     api_endpoints: list[dict[str, str]] = field(default_factory=list)
+    api_params: dict[str, list[str]] = field(default_factory=dict)
+    api_responses: list[dict[str, Any]] = field(default_factory=list)
+    api_response_urls: list[str] = field(default_factory=list)
+    recovery: list[dict[str, Any]] = field(default_factory=list)
     media: dict[str, list[str]] = field(default_factory=dict)
+    assets: dict[str, list[str]] = field(default_factory=dict)
+    streams: list[dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
     blocked: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -191,7 +288,14 @@ class CrawlPage:
             "analysis": self.analysis.summary() if self.analysis else None,
             "links": self.links,
             "api_endpoints": self.api_endpoints,
+            "api_params": self.api_params,
+            "api_responses": self.api_responses,
+            "api_response_urls": self.api_response_urls,
+            "recovery": self.recovery,
             "media": self.media,
+            "assets": self.assets,
+            "streams": self.streams,
+            "events": self.events,
         }
 
 
@@ -202,6 +306,8 @@ class CrawlResult:
     pages: list[CrawlPage]
     config: dict[str, Any] = field(default_factory=dict)
     sitemap_urls: list[str] = field(default_factory=list)
+    url_store_seen: int = 0
+    jsonl_lines: int = 0
 
     def summary(self) -> dict[str, Any]:
         ok = sum(1 for page in self.pages if not page.error and not page.blocked)
@@ -209,7 +315,23 @@ class CrawlResult:
         errors = sum(1 for page in self.pages if page.error)
         robots = sum(1 for page in self.pages if page.skipped_reason == "robots")
         api_count = sum(len(page.api_endpoints) for page in self.pages)
+        param_hint_count = sum(len(page.api_params) for page in self.pages)
+        api_response_count = sum(len(page.api_responses) for page in self.pages)
+        api_url_count = sum(len(page.api_response_urls) for page in self.pages)
+        recovery_count = sum(len(page.recovery) for page in self.pages)
+        recovered = sum(
+            1
+            for page in self.pages
+            if page.recovery and not page.blocked and not page.error
+        )
         media_count = sum(len(values) for page in self.pages for values in page.media.values())
+        asset_count = sum(len(values) for page in self.pages for values in page.assets.values())
+        css_count = sum(len(page.assets.get("css", [])) for page in self.pages)
+        js_count = sum(len(page.assets.get("js", [])) for page in self.pages)
+        stream_count = sum(len(page.streams) for page in self.pages)
+        event_count = sum(len(page.events) for page in self.pages)
+        file_count = sum(len(page.media.get("files", [])) for page in self.pages)
+        subtitle_count = sum(len(page.media.get("subtitles", [])) for page in self.pages)
         link_count = sum(len(page.links) for page in self.pages)
         security_kinds: dict[str, int] = {}
         for page in self.pages:
@@ -228,7 +350,21 @@ class CrawlResult:
             "robots_skipped": robots,
             "sitemap_urls": len(self.sitemap_urls),
             "api_endpoints": api_count,
+            "param_hints": param_hint_count,
+            "api_responses": api_response_count,
+            "api_response_urls": api_url_count,
+            "block_recoveries": recovery_count,
+            "recovered_pages": recovered,
             "media_urls": media_count,
+            "url_store_seen": self.url_store_seen,
+            "jsonl_lines": self.jsonl_lines,
+            "assets": asset_count,
+            "css": css_count,
+            "js": js_count,
+            "streams": stream_count,
+            "events": event_count,
+            "files": file_count,
+            "subtitles": subtitle_count,
             "links": link_count,
             "security_findings": security_kinds,
             "depths": {str(key): value for key, value in sorted(depths.items())},
@@ -240,6 +376,8 @@ class CrawlResult:
             "sitemap_urls": self.sitemap_urls,
             "summary": self.summary(),
             "pages": [page.to_dict() for page in self.pages],
+            "url_store_seen": self.url_store_seen,
+            "jsonl_lines": self.jsonl_lines,
         }
 
 
@@ -258,6 +396,18 @@ class DeepCrawler:
         self.fetch_page = fetch_page
         self.progress = progress
         self.seen: set[str] = set()
+        self.url_store = (
+            UrlDeduplicator(config.url_store_path)
+            if config.url_store_path
+            else None
+        )
+        self.url_store_seen = 0
+        self._jsonl_handle = (
+            open(config.jsonl_path, "a", encoding="utf-8")  # noqa: SIM115
+            if config.jsonl_path
+            else None
+        )
+        self.jsonl_lines = 0
         self.sitemap_urls: list[str] = []
         self._robots_cache: dict[str, RobotsPolicy | None] = {}
         self._robots_raw: dict[str, str] = {}
@@ -416,6 +566,13 @@ class DeepCrawler:
         if self.progress is not None:
             self.progress("crawl", percent, message)
 
+    def _write_page_jsonl(self, page: CrawlPage) -> None:
+        if self._jsonl_handle is not None:
+            self._jsonl_handle.write(
+                json.dumps(page.to_dict(), ensure_ascii=False) + "\n"
+            )
+            self.jsonl_lines += 1
+
     def _clean_links(self, raw_links: list[str], base_url: str) -> list[str]:
         cleaned: list[str] = []
         for raw in raw_links:
@@ -423,6 +580,249 @@ class DeepCrawler:
             if normalized is not None and self._allowed(normalized) and normalized not in cleaned:
                 cleaned.append(normalized)
         return cleaned
+
+    def _crawl_page_apis(self, page: CrawlPage) -> None:
+        if not self.config.crawl_api_endpoints:
+            return
+        from param_augmenter import extract_api_urls
+
+        endpoint_urls = {
+            str(endpoint.get("url") or "")
+            for endpoint in page.api_endpoints
+        }
+        pending = list(page.api_endpoints)
+        fetched: set[str] = set()
+        calls = 0
+        while pending and calls < self.config.max_api_calls:
+            endpoint = pending.pop(0)
+            method = str(endpoint.get("method") or "GET").upper()
+            endpoint_url = str(endpoint.get("url") or "")
+            if method != "GET" or not endpoint_url.startswith(("http://", "https://")):
+                continue
+            if endpoint_url in fetched:
+                continue
+            fetched.add(endpoint_url)
+            calls += 1
+            try:
+                response = self._fetch(endpoint_url)
+                body = response.body[: self.config.api_max_payload_bytes]
+                text = body.decode("utf-8", "replace")
+                try:
+                    data = json.loads(text)
+                except json.JSONDecodeError:
+                    data = None
+                page.api_responses.append(
+                    {
+                        "url": endpoint_url,
+                        "status": response.status,
+                        "error": None,
+                        "keys": list(data.keys())[:50] if isinstance(data, dict) else None,
+                        "bytes": len(response.body),
+                    }
+                )
+                if data is not None:
+                    for nested in extract_api_urls(data, base_url=endpoint_url):
+                        if nested in endpoint_urls or not self._allowed(nested):
+                            continue
+                        endpoint_urls.add(nested)
+                        page.api_response_urls.append(nested)
+                        nested_endpoint = {
+                            "method": "GET",
+                            "url": nested,
+                            "source": "response-url",
+                        }
+                        page.api_endpoints.append(nested_endpoint)
+                        pending.append(nested_endpoint)
+            except Exception as exc:
+                page.api_responses.append(
+                    {
+                        "url": endpoint_url,
+                        "status": None,
+                        "error": str(exc),
+                        "keys": None,
+                        "bytes": 0,
+                    }
+                )
+
+    def _recover_blocked(
+        self,
+        url: str,
+        response: CrawledResponse,
+        report: SecurityReport,
+    ) -> tuple[CrawledResponse, SecurityReport, list[dict[str, Any]]] | None:
+        if not report.is_blocked or self.config.block_retries <= 0:
+            return None
+        recovery: list[dict[str, Any]] = []
+        session = self._default_session()
+        for attempt in range(1, self.config.block_retries + 1):
+            wait = self.config.block_retry_delay * (
+                self.config.block_retry_backoff ** (attempt - 1)
+            )
+            time.sleep(wait + random.uniform(0.0, min(1.0, wait * 0.1)))
+            strategies: list[str] = []
+            if self.config.rotate_proxy_on_block and session is not None:
+                clear_pinned = getattr(session, "clear_pinned_proxy", None)
+                if clear_pinned is not None:
+                    clear_pinned()
+                current_proxy = getattr(session, "_current_proxy", lambda: None)()
+                if session.proxy_pool is not None:
+                    session.proxy_pool.report_failure(current_proxy)
+                strategies.append("proxy-rotate")
+            rotate_backend = getattr(session, "rotate_backend", None)
+            if rotate_backend is not None:
+                backend = rotate_backend()
+                if backend:
+                    strategies.append(f"backend:{backend}")
+            try:
+                response = self._fetch(url)
+            except urllib.error.HTTPError as exc:
+                recovery.append(
+                    {
+                        "attempt": attempt,
+                        "strategies": strategies,
+                        "status": int(exc.code),
+                        "error": f"HTTP {exc.code}",
+                        "recovered": False,
+                    }
+                )
+                continue
+            except Exception as exc:
+                recovery.append(
+                    {
+                        "attempt": attempt,
+                        "strategies": strategies,
+                        "status": None,
+                        "error": str(exc),
+                        "recovered": False,
+                    }
+                )
+                continue
+            html = response.body.decode("utf-8", "replace")
+            report = detect_security_mechanisms(
+                response.status,
+                url,
+                response.headers,
+                html,
+                html=html,
+                page_url=url,
+            )
+            recovery.append(
+                {
+                    "attempt": attempt,
+                    "strategies": strategies,
+                    "status": response.status,
+                    "error": None,
+                    "recovered": not report.is_blocked,
+                }
+            )
+            if not report.is_blocked:
+                break
+        if report.is_blocked and self.config.alternate_on_block:
+            try:
+                from alternate_access import try_alternate_access
+
+                proxy = self.config.proxy
+                if session is not None and getattr(session, "proxy_pool", None) is not None:
+                    proxy = session.proxy_pool.get_proxy()
+                alt = try_alternate_access(
+                    url,
+                    {"alternate": {"enabled": True, "max_variants": 4}},
+                    proxy=proxy,
+                    timeout=3.0,
+                    max_variants=4,
+                )
+                if alt.passed:
+                    body = (
+                        alt.body.encode("utf-8")
+                        if isinstance(alt.body, str)
+                        else alt.body
+                    )
+                    response = CrawledResponse(
+                        url=url,
+                        status=alt.status,
+                        headers=alt.headers,
+                        body=body,
+                    )
+                    html = response.body.decode("utf-8", "replace")
+                    report = detect_security_mechanisms(
+                        response.status,
+                        url,
+                        response.headers,
+                        html,
+                        html=html,
+                        page_url=url,
+                    )
+                    recovery.append(
+                        {
+                            "attempt": "alternate",
+                            "strategies": ["alternate-access"],
+                            "status": response.status,
+                            "error": None,
+                            "recovered": not report.is_blocked,
+                        }
+                    )
+            except Exception as exc:
+                recovery.append(
+                    {
+                        "attempt": "alternate",
+                        "strategies": ["alternate-access"],
+                        "status": None,
+                        "error": str(exc),
+                        "recovered": False,
+                    }
+                )
+        if report.is_blocked and self.config.browser_on_block:
+            try:
+                from stealth_browser import solve_cloudflare_with_stealth_browser
+
+                proxy = self.config.proxy
+                if session is not None and getattr(session, "proxy_pool", None) is not None:
+                    proxy = session.proxy_pool.get_proxy()
+                browser_result = solve_cloudflare_with_stealth_browser(
+                    url,
+                    engine="auto",
+                    proxy=proxy,
+                    headless=True,
+                    auto_install=False,
+                    max_attempts=1,
+                )
+                if browser_result is not None and browser_result.html:
+                    body = browser_result.html.encode("utf-8")
+                    response = CrawledResponse(
+                        url=url,
+                        status=200,
+                        headers={},
+                        body=body,
+                    )
+                    html = response.body.decode("utf-8", "replace")
+                    report = detect_security_mechanisms(
+                        response.status,
+                        url,
+                        response.headers,
+                        html,
+                        html=html,
+                        page_url=url,
+                    )
+                    recovery.append(
+                        {
+                            "attempt": "browser",
+                            "strategies": ["browser-escalation"],
+                            "status": response.status,
+                            "error": None,
+                            "recovered": not report.is_blocked,
+                        }
+                    )
+            except Exception as exc:
+                recovery.append(
+                    {
+                        "attempt": "browser",
+                        "strategies": ["browser-escalation"],
+                        "status": None,
+                        "error": str(exc),
+                        "recovered": False,
+                    }
+                )
+        return response, report, recovery
 
     def crawl(self) -> CrawlResult:
         queue: deque[tuple[str, int]] = deque()
@@ -450,14 +850,14 @@ class DeepCrawler:
 
             policy = self._robots_for(url)
             if policy is not None and policy.loaded and not policy.can_fetch(url):
-                pages.append(
-                    CrawlPage(
-                        url=url,
-                        depth=depth,
-                        skipped_reason="robots",
-                        status=403,
-                    )
+                skipped_page = CrawlPage(
+                    url=url,
+                    depth=depth,
+                    skipped_reason="robots",
+                    status=403,
                 )
+                pages.append(skipped_page)
+                self._write_page_jsonl(skipped_page)
                 self._report(len(pages) / self.config.max_pages, f"robots denied: {url}")
                 continue
 
@@ -472,7 +872,9 @@ class DeepCrawler:
                     body=body,
                 )
             except Exception as exc:
-                pages.append(CrawlPage(url=url, depth=depth, error=str(exc)))
+                error_page = CrawlPage(url=url, depth=depth, error=str(exc))
+                pages.append(error_page)
+                self._write_page_jsonl(error_page)
                 self._report(len(pages) / self.config.max_pages, f"fetch error: {url}")
                 continue
 
@@ -485,6 +887,12 @@ class DeepCrawler:
                 html=html,
                 page_url=url,
             )
+            recovery: list[dict[str, Any]] = []
+            if report.is_blocked:
+                recovered = self._recover_blocked(url, response, report)
+                if recovered is not None:
+                    response, report, recovery = recovered
+                    html = response.body.decode("utf-8", "replace")
             page = CrawlPage(
                 url=url,
                 depth=depth,
@@ -492,9 +900,11 @@ class DeepCrawler:
                 html=html,
                 security=report,
                 blocked=report.is_blocked,
+                recovery=recovery,
             )
             if report.is_blocked and self.config.skip_blocked:
                 pages.append(page)
+                self._write_page_jsonl(page)
                 self._report(
                     len(pages) / self.config.max_pages,
                     f"blocked ({report.primary_kind}): {url}",
@@ -505,14 +915,41 @@ class DeepCrawler:
             page.analysis = analysis
             page.links = self._clean_links(list(analysis.media.links), url)
             page.api_endpoints = [item.to_dict() for item in analysis.api_endpoints]
+            if self.config.collect_param_hints:
+                from param_augmenter import collect_page_param_hints
+
+                page.api_params = collect_page_param_hints(
+                    url,
+                    analysis,
+                    links=list(analysis.media.links),
+                    max_values=self.config.max_param_hints,
+                    max_keys=self.config.max_param_hints,
+                )
+            self._crawl_page_apis(page)
+            asset_files: list[str] = []
+            subtitles: list[str] = []
+            for link_url in analysis.media.links:
+                asset_kind = _classify_asset_url(link_url)
+                if asset_kind == "subtitle":
+                    subtitles.append(link_url)
+                elif asset_kind == "file":
+                    asset_files.append(link_url)
             page.media = {
                 "videos": analysis.media.videos,
                 "audios": analysis.media.audios,
                 "images": analysis.media.images,
                 "hls": analysis.media.hls,
+                "dash": analysis.media.dash,
+                "smooth": analysis.media.smooth,
+                "subtitles": subtitles,
+                "files": asset_files,
                 "links": analysis.media.links,
             }
+            page.assets = analysis.assets
+            page.streams = list(analysis.streams)
+            page.events = list(analysis.events)
             pages.append(page)
+            self._write_page_jsonl(page)
 
             if depth < self.config.max_depth:
                 for link in page.links:
@@ -526,10 +963,35 @@ class DeepCrawler:
                 f"crawled {len(pages)}/{self.config.max_pages}: {url}",
             )
 
+        if self.url_store is not None:
+            discovered: list[str] = []
+            for page in pages:
+                discovered.append(page.url)
+                discovered.extend(page.links)
+                for values in page.media.values():
+                    discovered.extend(values)
+                for values in page.assets.values():
+                    discovered.extend(values)
+                for stream in page.streams:
+                    stream_url = str(stream.get("url") or "")
+                    if stream_url:
+                        discovered.append(stream_url)
+            self.url_store.add_many(discovered)
+            checkpoint = self.url_store.checkpoint()
+            self.url_store_seen = int(checkpoint.get("seen_urls") or 0)
+            self.url_store.close()
+            self.url_store = None
+
+        if self._jsonl_handle is not None:
+            self._jsonl_handle.close()
+            self._jsonl_handle = None
+
         return CrawlResult(
             pages=pages,
             config=self.config.to_dict(),
             sitemap_urls=list(self.sitemap_urls),
+            url_store_seen=self.url_store_seen,
+            jsonl_lines=self.jsonl_lines,
         )
 
 
@@ -564,6 +1026,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="auto-install missing optional web-fetch packages (default: auto mode installs)",
     )
+    parser.add_argument(
+        "--crawl-api",
+        action="store_true",
+        help="fetch discovered API endpoints during the crawl and discover nested API URLs",
+    )
+    parser.add_argument("--max-api-calls", type=int, default=100)
     args = parser.parse_args(argv)
 
     config = CrawlConfig(
@@ -580,6 +1048,8 @@ def main(argv: list[str] | None = None) -> int:
         max_retries=args.max_retries,
         fetch_backend=args.fetch_backend,
         fetch_auto_install=args.auto_install,
+        crawl_api_endpoints=args.crawl_api,
+        max_api_calls=args.max_api_calls,
     )
     result = DeepCrawler(config).crawl()
     text = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)

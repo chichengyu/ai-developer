@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import urllib.parse
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +52,7 @@ class HLSResolution:
             "variant": _variant_dict(self.variant) if self.variant else None,
             "segments": len(self.playlist.segments),
             "keys": [item.__dict__ for item in self.playlist.keys],
+            "renditions": [item.__dict__ for item in self.playlist.renditions],
             "init_uri": self.playlist.init_uri,
             "target_duration": self.playlist.target_duration,
             "media_sequence": self.playlist.media_sequence,
@@ -68,7 +71,9 @@ class HLSDownloadResult:
     media_playlist_path: str | None = None
     combined_path: str | None = None
     segment_paths: list[str] = field(default_factory=list)
+    subtitle_paths: list[str] = field(default_factory=list)
     downloaded_segments: int = 0
+    resumed_segments: int = 0
     failed_segments: int = 0
     total_bytes: int = 0
     decrypted: bool = False
@@ -76,6 +81,7 @@ class HLSDownloadResult:
     encryption_method: str | None = None
     errors: list[str] = field(default_factory=list)
     resolution: HLSResolution | None = None
+    metadata: dict[str, Any] | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -84,13 +90,16 @@ class HLSDownloadResult:
             "output_dir": self.output_dir,
             "combined_path": self.combined_path,
             "segment_paths": len(self.segment_paths),
+            "subtitle_paths": len(self.subtitle_paths),
             "downloaded_segments": self.downloaded_segments,
+            "resumed_segments": self.resumed_segments,
             "failed_segments": self.failed_segments,
             "total_bytes": self.total_bytes,
             "decrypted": self.decrypted,
             "encrypted": self.encrypted,
             "encryption_method": self.encryption_method,
             "errors": list(self.errors),
+            "metadata": self.metadata,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -102,7 +111,9 @@ class HLSDownloadResult:
             "media_playlist_path": self.media_playlist_path,
             "combined_path": self.combined_path,
             "segment_paths": list(self.segment_paths),
+            "subtitle_paths": list(self.subtitle_paths),
             "downloaded_segments": self.downloaded_segments,
+            "resumed_segments": self.resumed_segments,
             "failed_segments": self.failed_segments,
             "total_bytes": self.total_bytes,
             "decrypted": self.decrypted,
@@ -110,6 +121,7 @@ class HLSDownloadResult:
             "encryption_method": self.encryption_method,
             "errors": list(self.errors),
             "resolution": self.resolution.to_dict() if self.resolution else None,
+            "metadata": self.metadata,
         }
 
 
@@ -213,6 +225,24 @@ class HLSClient:
             full, _ = self._fetch_bytes(url)
             return full[offset : offset + length]
 
+    def _fetch_range_with_retries(
+        self,
+        url: str,
+        byterange: str | None,
+        retries: int,
+    ) -> bytes:
+        last_error: Exception | None = None
+        for attempt in range(max(0, int(retries)) + 1):
+            try:
+                return self._fetch_range(url, byterange)
+            except Exception as exc:
+                last_error = exc
+                if attempt < retries:
+                    time.sleep(0.2 * (2**attempt))
+        if last_error is not None:
+            raise last_error
+        raise HLSError(f"HLS segment fetch failed: {url}")
+
     def resolve(
         self,
         url: str,
@@ -295,6 +325,8 @@ class HLSClient:
         save_playlists: bool = True,
         segment_prefix: str = "segment",
         overwrite: bool = False,
+        include_subtitles: bool = True,
+        segment_retries: int = 2,
     ) -> HLSDownloadResult:
         """Download one HLS stream and optionally combine the segments."""
         out = Path(output_dir)
@@ -310,6 +342,7 @@ class HLSClient:
             media_url=resolution.media_url,
             resolution=resolution,
         )
+        playlist = resolution.playlist
         if save_playlists:
             if resolution.master_text:
                 master_path = out / "master.m3u8"
@@ -321,7 +354,23 @@ class HLSClient:
                 media_path.write_text(resolution.media_text, encoding="utf-8")
             result.media_playlist_path = str(media_path)
 
-        playlist = resolution.playlist
+        if include_subtitles:
+            subtitle_dir = out / "subtitles"
+            subtitle_dir.mkdir(parents=True, exist_ok=True)
+            for index, rendition in enumerate(playlist.renditions):
+                if rendition.media_type != "SUBTITLES" or not rendition.uri:
+                    continue
+                try:
+                    subtitle_data, _ = self._fetch_bytes(rendition.uri)
+                    suffix = Path(urllib.parse.urlsplit(rendition.uri).path).suffix or ".vtt"
+                    name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(rendition.name or f"subtitle-{index}"))
+                    subtitle_path = subtitle_dir / f"{name}{suffix}"
+                    if overwrite or not subtitle_path.exists():
+                        subtitle_path.write_bytes(subtitle_data)
+                    result.subtitle_paths.append(str(subtitle_path))
+                except Exception as exc:
+                    result.errors.append(f"subtitle {index}: {exc}")
+
         keys: dict[int, bytes] = {}
         for index, key in enumerate(playlist.keys):
             if key.method not in {"AES-128", "AES-256"} or not key.uri:
@@ -352,7 +401,26 @@ class HLSClient:
         try:
             for index, segment in enumerate(playlist.segments):
                 try:
-                    data = self._fetch_range(segment.uri, segment.byterange)
+                    segment_path = (
+                        out / f"{segment_prefix}_{index:05d}.seg"
+                        if include_segments
+                        else None
+                    )
+                    resumed = False
+                    if (
+                        segment_path is not None
+                        and not overwrite
+                        and segment_path.exists()
+                        and segment_path.stat().st_size > 0
+                    ):
+                        data = segment_path.read_bytes()
+                        resumed = True
+                    else:
+                        data = self._fetch_range_with_retries(
+                            segment.uri,
+                            segment.byterange,
+                            segment_retries,
+                        )
                     key_index = segment.key_index
                     if key_index is not None and key_index < len(playlist.keys):
                         key_spec = playlist.keys[key_index]
@@ -372,11 +440,17 @@ class HLSClient:
                                     "AES decryption unavailable: "
                                     "install cryptography or pycryptodome"
                                 )
-                    if include_segments:
-                        segment_path = out / f"{segment_prefix}_{index:05d}.seg"
+                        elif key_spec.method in {"SAMPLE-AES", "SAMPLE-AES-CTR"}:
+                            result.errors.append(
+                                f"segment {index}: {key_spec.method} sample encryption "
+                                "is not supported"
+                            )
+                    if include_segments and segment_path is not None:
                         if overwrite or not segment_path.exists():
                             segment_path.write_bytes(data)
                         result.segment_paths.append(str(segment_path))
+                    if resumed:
+                        result.resumed_segments += 1
                     if combined_handle is not None:
                         combined_handle.write(data)
                     result.downloaded_segments += 1
@@ -389,6 +463,9 @@ class HLSClient:
                 combined_handle.close()
         if combined_path is not None:
             result.combined_path = str(combined_path)
+            from media_metadata import probe_media_file
+
+            result.metadata = probe_media_file(combined_path)
         return result
 
 
@@ -455,6 +532,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--combine", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--decrypt", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--subtitles", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--segment-retries", type=int, default=2)
     parser.add_argument("--proxy", default=None)
     parser.add_argument("--headers", default=None, help="JSON headers object")
     args = parser.parse_args(argv)
@@ -470,6 +549,8 @@ def main(argv: list[str] | None = None) -> int:
                 include_segments=args.segments,
                 combine=args.combine,
                 decrypt=args.decrypt,
+                include_subtitles=args.subtitles,
+                segment_retries=args.segment_retries,
             )
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         else:

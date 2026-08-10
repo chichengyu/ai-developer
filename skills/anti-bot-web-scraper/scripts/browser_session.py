@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
+import tempfile
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -223,7 +225,14 @@ class FingerprintOptions:
 
 @dataclass
 class NetworkCaptureOptions:
-    capture_types: tuple[str, ...] = ("document", "xhr", "fetch", "websocket", "media")
+    capture_types: tuple[str, ...] = (
+        "document",
+        "xhr",
+        "fetch",
+        "websocket",
+        "eventsource",
+        "media",
+    )
     include_bodies: bool = True
     include_headers: bool = False
     max_body_bytes: int = 2 * 1024 * 1024
@@ -246,10 +255,17 @@ class NetworkEntry:
     error: str | None = None
     started_at: float | None = None
     finished_at: float | None = None
+    frame_data: Any = None
+    direction: str | None = None
 
     @property
     def is_api(self) -> bool:
-        return self.resource_type in {"xhr", "fetch", "websocket"} or self.json_data is not None
+        return self.resource_type in {
+            "xhr",
+            "fetch",
+            "websocket",
+            "eventsource",
+        } or self.json_data is not None
 
     def to_dict(self, include_body: bool = True) -> dict[str, Any]:
         return {
@@ -268,6 +284,8 @@ class NetworkEntry:
             "error": self.error,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "frame_data": self.frame_data,
+            "direction": self.direction,
         }
 
 
@@ -280,6 +298,7 @@ class PageCapture:
     started_at: float = 0.0
     finished_at: float = 0.0
     security: dict[str, Any] | None = None
+    storage: dict[str, Any] | None = None
 
     def api_calls(self) -> list[NetworkEntry]:
         return [entry for entry in self.network if entry.is_api]
@@ -292,6 +311,24 @@ class PageCapture:
             urls.extend(self.analysis.json_media.hls)
         for entry in self.network:
             if ".m3u8" in entry.url.lower():
+                urls.append(entry.url)
+        seen: set[str] = set()
+        unique: list[str] = []
+        for url in urls:
+            if url not in seen:
+                seen.add(url)
+                unique.append(url)
+        return unique
+
+    def dash_urls(self) -> list[str]:
+        """Return DASH MPD URLs from page analysis plus runtime network capture."""
+        urls: list[str] = []
+        if self.analysis is not None:
+            urls.extend(self.analysis.media.dash)
+            urls.extend(self.analysis.json_media.dash)
+        for entry in self.network:
+            lower = entry.url.lower()
+            if ".mpd" in lower or "format=mpd" in lower:
                 urls.append(entry.url)
         seen: set[str] = set()
         unique: list[str] = []
@@ -360,6 +397,8 @@ class BrowserSession:
         headless: bool = True,
         proxy: str | None = None,
         user_data_dir: str | Path | None = None,
+        container: bool = False,
+        container_dir: str | Path | None = None,
         fingerprint: FingerprintOptions | None = None,
         action_interval: float = 0.0,
         action_jitter: float = 0.2,
@@ -370,15 +409,28 @@ class BrowserSession:
         captcha_solver: Any | None = None,
         slider_solver: Any | None = None,
         audio_solver: Any | None = None,
+        auto_install: bool = True,
     ) -> None:
         self.headless = headless
         self.proxy = proxy
-        self.user_data_dir = Path(user_data_dir) if user_data_dir else None
+        self.container = bool(container)
+        self._container_temp_dir: Path | None = None
+        if container and container_dir:
+            self.user_data_dir = Path(container_dir)
+            self.user_data_dir.mkdir(parents=True, exist_ok=True)
+        elif container and user_data_dir:
+            self.user_data_dir = Path(user_data_dir)
+        elif container:
+            self._container_temp_dir = Path(tempfile.mkdtemp(prefix="codex-browser-container-"))
+            self.user_data_dir = self._container_temp_dir
+        else:
+            self.user_data_dir = Path(user_data_dir) if user_data_dir else None
         self.binding = resolve_binding(fingerprint_binding)
         self.cloudflare_config = dict(cloudflare_config or {})
         self.captcha_solver = captcha_solver
         self.slider_solver = slider_solver or SliderCaptchaSolver()
         self.audio_solver = audio_solver
+        self.auto_install = bool(auto_install)
         self.fingerprint = (
             FingerprintOptions.from_binding(self.binding)
             if self.binding is not None
@@ -397,23 +449,38 @@ class BrowserSession:
         self.page: Any = None
         self._capture_options: NetworkCaptureOptions | None = None
         self._capture_attached = False
+        self._capture_websocket_attached = False
         self._network: list[NetworkEntry] = []
 
     def start(self) -> None:
         if self.engine == "patchright":
             try:
                 from patchright.sync_api import sync_playwright
-            except ImportError as exc:
-                raise RuntimeError(
-                    "pip install patchright && python -m patchright install chromium"
-                ) from exc
+            except ImportError:
+                if not self.auto_install:
+                    raise
+                from ensure_web_fetch_dependencies import ensure as ensure_fetch_deps
+
+                ensure_fetch_deps(install=True, packages=("patchright",))
+                from patchright.sync_api import sync_playwright
         else:
             try:
                 from playwright.sync_api import sync_playwright
-            except ImportError as exc:
-                raise RuntimeError("pip install playwright && playwright install chromium") from exc
+            except ImportError:
+                if not self.auto_install:
+                    raise
+                from ensure_web_fetch_dependencies import ensure as ensure_fetch_deps
+
+                ensure_fetch_deps(install=True, packages=("playwright",))
+                from playwright.sync_api import sync_playwright
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=self.headless)
+        launch_options: dict[str, Any] = {"headless": self.headless}
+        from stealth_browser import default_browser_path
+
+        browser_path = default_browser_path()
+        if browser_path:
+            launch_options["executable_path"] = browser_path
+        self._browser = self._playwright.chromium.launch(**launch_options)
         kwargs = self.fingerprint.to_context_kwargs()
         if self.proxy:
             kwargs["proxy"] = {"server": self.proxy}
@@ -506,6 +573,9 @@ class BrowserSession:
             self.page.on("request", self._on_request)
             self.page.on("response", self._on_response)
             self._capture_attached = True
+        if not self._capture_websocket_attached:
+            self.page.on("websocket", self._on_websocket)
+            self._capture_websocket_attached = True
 
     def stop_capture(self) -> list[NetworkEntry]:
         """Stop recording and return the captured network entries."""
@@ -580,6 +650,48 @@ class BrowserSession:
             if entry is not None:
                 entry.finished_at = time.monotonic()
 
+    def _on_websocket(self, websocket: Any) -> None:
+        if self._capture_options is None:
+            return
+        url = str(getattr(websocket, "url", "") or "")
+        entry = NetworkEntry(
+            method="WS",
+            url=url,
+            resource_type="websocket",
+            started_at=time.monotonic(),
+        )
+        self._network.append(entry)
+        try:
+            websocket.on("framesent", lambda payload: self._record_ws_frame(url, payload, "sent"))
+            websocket.on(
+                "framereceived",
+                lambda payload: self._record_ws_frame(url, payload, "received"),
+            )
+        except Exception:
+            pass
+
+    def _record_ws_frame(self, url: str, payload: Any, direction: str) -> None:
+        if self._capture_options is None:
+            return
+        parsed = None
+        if isinstance(payload, str):
+            try:
+                parsed = json.loads(payload)
+            except json.JSONDecodeError:
+                parsed = None
+        now = time.monotonic()
+        self._network.append(
+            NetworkEntry(
+                method="WS",
+                url=url,
+                resource_type="websocket",
+                frame_data=parsed if parsed is not None else payload,
+                direction=direction,
+                started_at=now,
+                finished_at=now,
+            )
+        )
+
     def _capture_body(
         self,
         entry: NetworkEntry,
@@ -608,6 +720,119 @@ class BrowserSession:
             body = response.body()
             entry.size = len(body)
             entry.body_text = body[:max_bytes].decode("utf-8", "replace")
+            if "text/event-stream" in content_type:
+                self._record_sse_events(entry, entry.body_text)
+
+    def _record_sse_events(self, entry: NetworkEntry, text: str) -> None:
+        """Parse an EventSource response body into discrete event entries."""
+        if self._capture_options is None:
+            return
+        for block in (text or "").split("\n\n"):
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            event_name = "message"
+            event_id: str | None = None
+            data_lines: list[str] = []
+            for line in lines:
+                if line.startswith("event:"):
+                    event_name = line.split(":", 1)[1].strip() or event_name
+                elif line.startswith("id:"):
+                    event_id = line.split(":", 1)[1].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line.split(":", 1)[1].strip())
+            if not data_lines:
+                continue
+            raw_data = "\n".join(data_lines)
+            try:
+                data: Any = json.loads(raw_data)
+            except json.JSONDecodeError:
+                data = raw_data
+            now = time.monotonic()
+            self._network.append(
+                NetworkEntry(
+                    method="SSE",
+                    url=entry.url,
+                    resource_type="eventsource",
+                    frame_data={
+                        "event": event_name,
+                        "data": data,
+                        "id": event_id,
+                    },
+                    direction="received",
+                    started_at=now,
+                    finished_at=now,
+                )
+            )
+
+    def capture_storage(self) -> dict[str, Any]:
+        """Capture cookies plus localStorage/sessionStorage for the current page."""
+        storage: dict[str, Any] = {}
+        if self.context is not None:
+            try:
+                storage["cookies"] = list(self.context.cookies() or [])
+            except Exception:
+                storage["cookies"] = []
+            try:
+                state = self.context.storage_state()
+                if isinstance(state, dict):
+                    storage.update(state)
+            except Exception:
+                pass
+        if self.page is not None:
+            for name, script in (
+                (
+                    "local",
+                    "() => { const out = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); out[k] = localStorage.getItem(k); } return out; }",
+                ),
+                (
+                    "session",
+                    "() => { const out = {}; for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); out[k] = sessionStorage.getItem(k); } return out; }",
+                ),
+            ):
+                try:
+                    storage[name] = self.page.evaluate(script)
+                except Exception:
+                    storage[name] = {}
+        return storage
+
+    def trigger_page_events(
+        self,
+        event_names: tuple[str, ...] = ("click",),
+        max_actions: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Trigger inline event handlers on the current page and return what fired."""
+        if self.page is None:
+            return []
+        names = ",".join(json.dumps(str(name)) for name in event_names)
+        script = f"""() => {{
+          const names = [{names}];
+          const found = [];
+          for (const name of names) {{
+            const nodes = document.querySelectorAll(`[on${{name}}]`);
+            for (const node of Array.from(nodes).slice(0, {max_actions})) {{
+              found.push({{
+                tag: node.tagName,
+                id: node.id || null,
+                name: node.name || null,
+                event: name
+              }});
+              try {{
+                if (name === "submit" && node.tagName === "FORM" && node.requestSubmit) {{
+                  node.requestSubmit();
+                }} else if (name === "change" || name === "input") {{
+                  node.dispatchEvent(new Event(name, {{bubbles: true}}));
+                }} else {{
+                  node.click();
+                }}
+              }} catch (e) {{}}
+            }}
+          }}
+          return found;
+        }}"""
+        try:
+            result = self.page.evaluate(script)
+            return result if isinstance(result, list) else []
+        except Exception:
+            return []
 
     def capture_page_data(
         self,
@@ -667,6 +892,7 @@ class BrowserSession:
             normal_challenges,
             image_paths=image_paths,
             max_challenges=max_challenges,
+            continue_on_error=True,
         )
         for challenge, answer in solved:
             self._fill_captcha_answer(challenge, answer)
@@ -975,6 +1201,9 @@ class BrowserSession:
             self._browser.close()
         if self._playwright:
             self._playwright.stop()
+        if self._container_temp_dir is not None:
+            shutil.rmtree(self._container_temp_dir, ignore_errors=True)
+            self._container_temp_dir = None
 
 
 if __name__ == "__main__":

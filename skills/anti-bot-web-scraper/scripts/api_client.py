@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import random
 import threading
 import time
 import urllib.parse
@@ -182,12 +183,18 @@ def _static_endpoint_to_spec(endpoint: Any) -> ApiSpec:
     method = str(_get(endpoint, "method", "GET") or "GET").upper()
     url = str(_get(endpoint, "url", "") or "")
     base_url, params = _split_query(url)
+    endpoint_params = _get(endpoint, "params", None)
+    merged_params = dict(params or {})
+    if isinstance(endpoint_params, dict):
+        merged_params.update(endpoint_params)
     return ApiSpec(
         method=method,
         url=base_url,
         name=_entry_name(url),
-        params=params or None,
+        params=merged_params or None,
+        body=_get(endpoint, "body", None),
         source=str(_get(endpoint, "source", "static") or "static"),
+        content_type=_get(endpoint, "content_type", None),
     )
 
 
@@ -207,14 +214,19 @@ def build_api_specs(
     """
 
     specs: list[ApiSpec] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
 
     def add(spec: ApiSpec) -> None:
         if len(specs) >= max_specs:
             return
         if urllib.parse.urlsplit(spec.url).scheme not in {"http", "https"}:
             return
-        key = (spec.method.upper(), spec.url)
+        body_key = (
+            json.dumps(spec.body, sort_keys=True, ensure_ascii=False, default=str)
+            if spec.body is not None
+            else ""
+        )
+        key = (spec.method.upper(), spec.url, body_key)
         if key in seen:
             return
         seen.add(key)
@@ -313,6 +325,10 @@ class ApiClient:
         max_retries: int = 0,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
+        block_retries: int = 2,
+        block_retry_delay: float = 2.0,
+        block_retry_backoff: float = 2.0,
+        rotate_proxy_on_block: bool = True,
         timeout: float = DEFAULT_TIMEOUT,
         cookies: list[dict[str, Any]] | None = None,
         backend: str = "standard",
@@ -329,6 +345,10 @@ class ApiClient:
         self.max_retries = max_retries
         self.backoff_base = backoff_base
         self.backoff_max = backoff_max
+        self.block_retries = block_retries
+        self.block_retry_delay = block_retry_delay
+        self.block_retry_backoff = block_retry_backoff
+        self.rotate_proxy_on_block = rotate_proxy_on_block
         self.timeout = timeout
         self.backend = backend
         self.auto_install = auto_install
@@ -346,6 +366,7 @@ class ApiClient:
                 "auto_install": self.auto_install,
                 "browser": self.browser_config,
                 "header_fingerprint": self.header_fingerprint,
+                "header_kind": "api",
                 "fingerprint_binding": self.fingerprint_binding,
             },
             headers=dict(self.headers),
@@ -379,6 +400,12 @@ class ApiClient:
             merged_params.update(params)
         url = _build_url(url, merged_params or None)
         headers = dict(spec.headers or {})
+        headers.setdefault("Accept", "application/json, text/plain, */*")
+        headers.setdefault("Sec-Fetch-Dest", "empty")
+        headers.setdefault("Sec-Fetch-Mode", "cors")
+        headers.setdefault("Sec-Fetch-Site", "same-origin")
+        headers.pop("Sec-Fetch-User", None)
+        headers.pop("Upgrade-Insecure-Requests", None)
         body = spec.body
         json_body = body if isinstance(body, dict | list) else None
         data = None if json_body is not None else body
@@ -514,13 +541,34 @@ class ApiClient:
 
         return records, pages, last_response
 
+    def _recover_blocked_identity(self) -> None:
+        clear_pinned = getattr(self.session, "clear_pinned_proxy", None)
+        if clear_pinned is not None:
+            clear_pinned()
+        if self.session.proxy_pool is not None:
+            current = getattr(self.session, "_current_proxy", lambda: None)()
+            self.session.proxy_pool.report_failure(current)
+        rotate_backend = getattr(self.session, "rotate_backend", None)
+        if rotate_backend is not None:
+            rotate_backend()
+
     def _fetch_result(
         self,
         spec: ApiSpec,
         timeout: float | None = None,
     ) -> ApiFetchResult:
-        try:
-            data, pages, meta = self._fetch_with_pages(spec, timeout=timeout)
+        for attempt in range(self.block_retries + 1):
+            try:
+                data, pages, meta = self._fetch_with_pages(spec, timeout=timeout)
+            except Exception as exc:
+                if attempt < self.block_retries:
+                    wait = self.block_retry_delay * (
+                        self.block_retry_backoff ** attempt
+                    )
+                    time.sleep(wait + random.uniform(0.0, min(1.0, wait * 0.1)))
+                    self._recover_blocked_identity()
+                    continue
+                return ApiFetchResult(spec=spec, error=str(exc))
             security = None
             error = None
             if meta is not None and meta.status is not None:
@@ -542,6 +590,15 @@ class ApiClient:
                 if report.is_blocked:
                     security = report.to_dict()
                     error = f"blocked by {report.primary_kind}"
+                    if attempt < self.block_retries:
+                        wait = self.block_retry_delay * (
+                            self.block_retry_backoff ** attempt
+                        )
+                        time.sleep(
+                            wait + random.uniform(0.0, min(1.0, wait * 0.1))
+                        )
+                        self._recover_blocked_identity()
+                        continue
                 elif meta.status >= 400:
                     security = report.to_dict()
                     error = f"HTTP {meta.status}"
@@ -555,8 +612,7 @@ class ApiClient:
                 security=security,
                 error=error,
             )
-        except Exception as exc:
-            return ApiFetchResult(spec=spec, error=str(exc))
+        return ApiFetchResult(spec=spec, error="block recovery exhausted")
 
     def fetch_all(
         self,
@@ -591,6 +647,10 @@ class ApiClient:
                 max_retries=self.max_retries,
                 backoff_base=self.backoff_base,
                 backoff_max=self.backoff_max,
+                block_retries=self.block_retries,
+                block_retry_delay=self.block_retry_delay,
+                block_retry_backoff=self.block_retry_backoff,
+                rotate_proxy_on_block=self.rotate_proxy_on_block,
                 timeout=self.timeout,
                 cookies=cookies,
                 backend=self.backend,

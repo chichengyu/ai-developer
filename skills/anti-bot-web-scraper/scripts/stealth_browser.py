@@ -15,7 +15,8 @@ for stronger anti-bot resistance and can cycle through them automatically:
 - `selenium` -- Selenium WebDriver with stealth injection
 
 All engines are lazy imports. Install them with
-`ensure_web_fetch_dependencies.py` or `media_dependencies.py --install`.
+`ensure_web_fetch_dependencies.py`; use `ensure_browser_binaries.py --install`
+when the Camoufox browser binary is needed.
 """
 
 from __future__ import annotations
@@ -404,6 +405,8 @@ def _solve_with_loop(
     progress: Callable[[str, float | None, str], None] | None,
     fingerprint_binding: str | dict[str, Any] | FingerprintBinding | None = None,
     captcha_solver: Any = None,
+    max_engines_per_round: int = 3,
+    initial_cookies: list[dict[str, Any]] | None = None,
 ) -> StealthBrowserResult:
     if auto_install:
         _ensure_engine_dependencies(engines)
@@ -419,7 +422,11 @@ def _solve_with_loop(
     best_cookie_result: StealthBrowserResult | None = None
     rounds = max(1, int(max_attempts))
     for round_no in range(rounds):
+        tried_engines = 0
         for engine in order:
+            if tried_engines >= max_engines_per_round:
+                break
+            tried_engines += 1
             current_proxy = proxy
             if proxy_pool is not None:
                 current_proxy = normalize_proxy(proxy_pool.get_proxy() or current_proxy)
@@ -434,6 +441,9 @@ def _solve_with_loop(
                         f"browser engine {engine} {mode_name} attempt {round_no + 1}",
                     )
                 try:
+                    engine_cookies = initial_cookies or (
+                        best_cookie_result.cookies if best_cookie_result is not None else None
+                    )
                     result = _solve_engine(
                         engine,
                         url,
@@ -444,6 +454,7 @@ def _solve_with_loop(
                         timeout_ms=timeout_ms,
                         fingerprint=binding,
                         captcha_solver=captcha_solver,
+                        initial_cookies=engine_cookies,
                     )
                 except Exception as exc:
                     _record_attempt(
@@ -468,13 +479,9 @@ def _solve_with_loop(
                 last = result
                 last.proxy = current_proxy
                 engine_failed = True
-            if best_cookie_result is not None:
-                break
             if engine_failed and proxy_pool is not None and current_proxy and rotate_proxy_on_fail:
                 proxy_pool.report_failure(current_proxy)
             time.sleep(max(0.0, retry_delay))
-        if best_cookie_result is not None:
-            break
     if best_cookie_result is not None:
         best_cookie_result.attempts = attempts
         best_cookie_result.error = best_cookie_result.error or (
@@ -506,6 +513,7 @@ def _solve_engine(
     timeout_ms: float,
     fingerprint: FingerprintBinding | None = None,
     captcha_solver: Any = None,
+    initial_cookies: list[dict[str, Any]] | None = None,
 ) -> StealthBrowserResult:
     if engine == "patchright":
         return _solve_patchright(
@@ -517,6 +525,7 @@ def _solve_engine(
             timeout_ms=timeout_ms,
             fingerprint=fingerprint,
             captcha_solver=captcha_solver,
+            initial_cookies=initial_cookies,
         )
     if engine == "camoufox":
         return _solve_camoufox(
@@ -612,6 +621,8 @@ def solve_cloudflare_with_stealth_browser(
     progress: Callable[[str, float | None, str], None] | None = None,
     fingerprint_binding: str | dict[str, Any] | FingerprintBinding | None = None,
     captcha_solver: Any = None,
+    max_engines_per_round: int = 3,
+    initial_cookies: list[dict[str, Any]] | None = None,
 ) -> StealthBrowserResult:
     """Solve a Cloudflare challenge, cycling engines until one clears."""
     engine = _normalize_engine(engine)
@@ -638,6 +649,8 @@ def solve_cloudflare_with_stealth_browser(
             progress=progress,
             fingerprint_binding=fingerprint_binding,
             captcha_solver=captcha_solver,
+            max_engines_per_round=max_engines_per_round,
+            initial_cookies=initial_cookies,
         )
         _store_result_cookies(result, url, cookie_store_path)
         return result
@@ -662,6 +675,8 @@ def solve_cloudflare_with_stealth_browser(
         progress=progress,
         fingerprint_binding=fingerprint_binding,
         captcha_solver=captcha_solver,
+        max_engines_per_round=max_engines_per_round,
+        initial_cookies=initial_cookies,
     )
     _store_result_cookies(result, url, cookie_store_path)
     return result
@@ -677,6 +692,7 @@ def _solve_patchright(
     timeout_ms: float,
     fingerprint: FingerprintBinding | None = None,
     captcha_solver: Any = None,
+    initial_cookies: list[dict[str, Any]] | None = None,
 ) -> StealthBrowserResult:
     try:
         from patchright.sync_api import sync_playwright
@@ -711,6 +727,7 @@ def _solve_patchright(
         except Exception:
             context_kwargs.pop("storage_state", None)
             context = browser.new_context(**context_kwargs)
+        _load_playwright_cookies(context, initial_cookies)
         if fingerprint is not None:
             context.add_init_script(_binding_init_script(fingerprint))
         apply_playwright_stealth(
@@ -1390,6 +1407,22 @@ def _normalize_cookies(
                 }
             )
     return normalized
+
+
+def _load_playwright_cookies(context: Any, cookies: list[dict[str, Any]] | None) -> None:
+    for item in cookies or []:
+        cookie: dict[str, Any] = {}
+        for key in ("name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite"):
+            if item.get(key) is not None:
+                cookie[key] = item[key]
+        if not cookie.get("name") or cookie.get("value") is None:
+            continue
+        if cookie.get("sameSite") is not None:
+            cookie["sameSite"] = str(cookie["sameSite"]).capitalize()
+        if cookie.get("expires") is not None and float(cookie["expires"]) <= 0:
+            cookie.pop("expires", None)
+        with suppress(Exception):
+            context.add_cookies([cookie])
 
 
 def _enum_value(value: Any) -> Any:

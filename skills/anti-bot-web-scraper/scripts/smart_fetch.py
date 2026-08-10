@@ -138,6 +138,7 @@ def create_fetch_session(config: dict[str, Any] | None = None, **kwargs: Any):
     cfg = dict(config or {})
     captcha_solver = cfg.get("captcha_solver") or kwargs.pop("captcha_solver", None)
     backend = normalize_backend(cfg.get("backend", "standard"))
+    kwargs["retry_on_block"] = bool(cfg.get("retry_on_block", False))
     if backend == "standard":
         return MediaSession(**kwargs)
     binding = binding_from_fetch_config(cfg)
@@ -154,6 +155,7 @@ def create_fetch_session(config: dict[str, Any] | None = None, **kwargs: Any):
         flaresolverr_config=cfg.get("flaresolverr"),
         browser_config=cfg.get("browser"),
         header_fingerprint=cfg.get("header_fingerprint", "chrome"),
+        header_kind=cfg.get("header_kind", "document"),
         fingerprint_binding=binding,
         captcha_solver=captcha_solver,
         auto_install_dependencies=bool(auto_install),
@@ -204,6 +206,7 @@ class SmartFetchSession(MediaSession):
         flaresolverr_config: dict[str, Any] | None = None,
         browser_config: dict[str, Any] | None = None,
         header_fingerprint: str = "chrome",
+        header_kind: str = "document",
         fingerprint_binding: str | dict[str, Any] | FingerprintBinding | None = None,
         captcha_solver: Any = None,
         auto_install_dependencies: bool = False,
@@ -239,6 +242,7 @@ class SmartFetchSession(MediaSession):
             if self.binding is not None
             else header_fingerprint or "chrome"
         )
+        self.header_kind = str(header_kind or "document").lower()
         self.auto_install_dependencies = auto_install_dependencies
         self._cookie_items: list[dict[str, Any]] = []
         self._curl_session: Any = None
@@ -246,6 +250,7 @@ class SmartFetchSession(MediaSession):
         self._cloudscraper: Any = None
         self._httpx_client: Any = None
         self._httpx_proxy: str | None = None
+        self._forced_backend: str | None = None
         self.stats: dict[str, Any] = {
             "attempts": [],
             "last_backend": None,
@@ -258,9 +263,18 @@ class SmartFetchSession(MediaSession):
     def _fingerprinted_headers(self, headers: dict[str, str]) -> dict[str, str]:
         if self.binding is not None:
             merged = self.binding.to_header_headers(headers)
-            return merged
-        profile = HeaderFingerprint.for_browser(self.header_fingerprint)
-        return profile.apply(headers)
+        else:
+            profile = HeaderFingerprint.for_browser(self.header_fingerprint)
+            profile = profile.for_kind(self.header_kind)
+            merged = profile.apply(headers)
+        if self.header_kind == "api":
+            merged.pop("Sec-Fetch-User", None)
+            merged.pop("Upgrade-Insecure-Requests", None)
+            merged["Accept"] = "application/json, text/plain, */*"
+            merged["Sec-Fetch-Dest"] = "empty"
+            merged["Sec-Fetch-Mode"] = "cors"
+            merged["Sec-Fetch-Site"] = "same-origin"
+        return merged
 
     def _ordered_backends(self) -> list[str]:
         if self.backend_mode == "standard":
@@ -283,7 +297,33 @@ class SmartFetchSession(MediaSession):
             ]
         if self.backend_mode in BACKEND_ORDER or self.backend_mode in EXTRA_BACKENDS:
             return [self.backend_mode]
-        return ["urllib"]
+        order = ["urllib"]
+        if self._forced_backend and self._forced_backend in order:
+            order.remove(self._forced_backend)
+            order.insert(0, self._forced_backend)
+        return order
+
+    def rotate_backend(self) -> str | None:
+        order = self._ordered_backends()
+        if not order:
+            return None
+        current = self.stats.get("last_backend") or order[0]
+        current = str(current).split(":", 1)[-1] if ":" in str(current) else str(current)
+        try:
+            index = order.index(current)
+        except ValueError:
+            index = -1
+        name = order[(index + 1) % len(order)]
+        self._forced_backend = name
+        self.stats["last_backend"] = None
+        return name
+
+    def _recover_blocked_identity(self) -> None:
+        self.clear_pinned_proxy()
+        if self.proxy_pool is not None:
+            current = self._current_proxy()
+            self.proxy_pool.report_failure(current)
+        self.rotate_backend()
 
     def _ensure_dependencies(self) -> None:
         try:
@@ -896,6 +936,7 @@ class SmartFetchSession(MediaSession):
         attempt = 0
         last: BackendResponse | None = None
         last_error: Exception | None = None
+        last_blocked = False
         while True:
             for name in self._ordered_backends():
                 try:
@@ -914,6 +955,7 @@ class SmartFetchSession(MediaSession):
                     continue
                 self._capture_set_cookie(url, response.headers)
                 blocked = self._classify(response)
+                last_blocked = blocked
                 self._record_attempt(
                     response.backend or name,
                     response.status,
@@ -943,6 +985,26 @@ class SmartFetchSession(MediaSession):
                     attempt,
                     retry_after,
                 )
+                if self.retry_policy.retry_on_block and (
+                    last_blocked or last.status in (401, 403)
+                ):
+                    self._recover_blocked_identity()
+                attempt += 1
+                continue
+            if (
+                last is not None
+                and last_blocked
+                and self.retry_policy is not None
+                and self.retry_policy.retry_on_block
+                and attempt < self.retry_policy.max_retries
+            ):
+                retry_after = parse_retry_after(last.headers.get("Retry-After"))
+                self.retry_policy.sleep_before_retry(
+                    last.status,
+                    attempt,
+                    retry_after,
+                )
+                self._recover_blocked_identity()
                 attempt += 1
                 continue
             break

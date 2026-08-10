@@ -82,6 +82,7 @@ class MediaSession:
         max_retries: int = 0,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
+        retry_on_block: bool = False,
         robots: RobotsPolicy | None = None,
         adaptive_throttle: AdaptiveThrottle | None = None,
         proxy_region: str | None = None,
@@ -111,6 +112,7 @@ class MediaSession:
                 max_retries=max_retries,
                 base_delay=backoff_base,
                 max_delay=backoff_max,
+                retry_on_block=retry_on_block,
             )
             if max_retries > 0
             else None

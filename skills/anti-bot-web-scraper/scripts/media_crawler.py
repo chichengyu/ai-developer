@@ -40,8 +40,76 @@ from smart_fetch import create_fetch_session
 
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif", ".ico"}
-_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".flv", ".ts", ".m4v", ".wmv"}
+_VIDEO_EXTS = {
+    ".mp4",
+    ".webm",
+    ".mov",
+    ".mkv",
+    ".avi",
+    ".flv",
+    ".ts",
+    ".m4v",
+    ".wmv",
+    ".mpd",
+    ".ism",
+}
 _AUDIO_EXTS = {".mp3", ".aac", ".m4a", ".wav", ".flac", ".ogg", ".opus", ".wma"}
+_ASSET_EXTS = (
+    _IMAGE_EXTS
+    | _VIDEO_EXTS
+    | _AUDIO_EXTS
+    | {
+        ".vtt",
+        ".srt",
+        ".ass",
+        ".ssa",
+        ".css",
+        ".js",
+        ".mjs",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".otf",
+        ".eot",
+        ".pdf",
+        ".zip",
+        ".rar",
+        ".7z",
+        ".tar",
+        ".gz",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".csv",
+        ".json",
+        ".xml",
+        ".txt",
+        ".epub",
+        ".mobi",
+    }
+)
+_DOCUMENT_EXTS = {
+    ".pdf",
+    ".zip",
+    ".rar",
+    ".7z",
+    ".tar",
+    ".gz",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".epub",
+    ".mobi",
+}
+_DATA_EXTS = {".json", ".xml", ".csv", ".txt"}
+_FONT_EXTS = {".woff", ".woff2", ".ttf", ".otf", ".eot"}
+_SUBTITLE_EXTS = {".vtt", ".srt", ".ass", ".ssa"}
 
 
 @dataclass
@@ -71,7 +139,20 @@ class MediaCrawlConfig:
     fetch_backend: str = "auto"
     fetch_auto_install: bool = False
     browser_config: dict[str, Any] | None = None
-    media_types: tuple[str, ...] = ("image", "video", "audio", "hls")
+    media_types: tuple[str, ...] = (
+        "image",
+        "video",
+        "audio",
+        "hls",
+        "dash",
+        "smooth",
+        "subtitle",
+        "file",
+        "css",
+        "js",
+        "font",
+        "data",
+    )
     download_media: bool = True
     auto_adjust_max_pages: bool = False
     max_pages_cap: int = 1000
@@ -96,7 +177,23 @@ class MediaCrawlConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> MediaCrawlConfig:
         values = dict(data or {})
-        media_types = tuple(values.get("media_types") or ("image", "video", "audio", "hls"))
+        media_types = tuple(
+            values.get("media_types")
+            or (
+                "image",
+                "video",
+                "audio",
+                "hls",
+                "dash",
+                "smooth",
+                "subtitle",
+                "file",
+                "css",
+                "js",
+                "font",
+                "data",
+            )
+        )
         return cls(
             seeds=[str(item) for item in values.get("seeds") or []],
             max_pages=int(values.get("max_pages", 100)),
@@ -377,6 +474,7 @@ class MediaCrawler:
         self._effective_max_pages = config.max_pages
         self._pages: list[MediaPage] = []
         self._media: list[MediaAsset] = []
+        self._media_seen: set[str] = set()
         self._robots_cache: dict[str, RobotsPolicy | None] = {}
         self._robots_raw: dict[str, str] = {}
         self.sitemap_urls: list[str] = []
@@ -415,7 +513,7 @@ class MediaCrawler:
         if self.config.same_host and self._host(url) not in self._seed_hosts:
             return False
         suffix = Path(parts.path).suffix.lower()
-        if suffix in _IMAGE_EXTS | _VIDEO_EXTS | _AUDIO_EXTS or ".m3u8" in url.lower():
+        if suffix in _ASSET_EXTS or ".m3u8" in url.lower():
             return False
         if self.config.include and not any(
             self._match(pattern, url) for pattern in self.config.include
@@ -732,6 +830,8 @@ class MediaCrawler:
             "video": "videos",
             "audio": "audios",
             "hls": "hls",
+            "dash": "dash",
+            "smooth": "smooth",
         }
         for source in sources:
             for kind in self.config.media_types:
@@ -757,13 +857,12 @@ class MediaCrawler:
         if not assets:
             return
         output = Path(self.config.output_dir)
-        seen_media: set[str] = set()
+        seen_media = self._media_seen
         deduped: list[MediaAsset] = []
         for asset in assets:
             if asset.url not in seen_media:
                 seen_media.add(asset.url)
                 deduped.append(asset)
-        self._media = deduped
         assets = deduped
         assets = [
             asset
@@ -812,10 +911,18 @@ class MediaCrawler:
                     0.8 + 0.2 * (completed / total),
                     f"media: {record.get('kind')} {record.get('url')}",
                 )
+        with self._lock:
+            has_new_nested = any(
+                asset.url not in self._media_seen for asset in self._media
+            )
+        if has_new_nested:
+            self._download_all_media()
 
     def _download_asset(self, asset: MediaAsset, output: Path) -> dict[str, Any]:
         if asset.kind == "hls":
             return self._download_hls(asset, output)
+        if asset.kind == "dash":
+            return self._download_dash(asset, output)
         return self._download_binary(asset, output)
 
     def _download_binary(self, asset: MediaAsset, output: Path) -> dict[str, Any]:
@@ -839,9 +946,29 @@ class MediaCrawler:
             asset.content_type = result.content_type
             asset.size = result.size
             asset.sha256 = result.sha256
+            asset.details = result.details
             asset.downloaded = result.error is None
             if result.error:
                 asset.error = result.error
+            nested_assets = (result.details or {}).get("nested_assets") or []
+            if nested_assets:
+                with self._lock:
+                    for nested_url in nested_assets:
+                        nested_kind = _classify_media_url(nested_url)
+                        if (
+                            nested_kind
+                            and nested_kind in self.config.media_types
+                            and nested_url not in self._media_seen
+                            and not any(item.url == nested_url for item in self._media)
+                        ):
+                            self._media.append(
+                                MediaAsset(
+                                    url=nested_url,
+                                    kind=nested_kind,
+                                    source_page=asset.source_page,
+                                    depth=asset.depth,
+                                )
+                            )
         except Exception as exc:
             asset.error = str(exc)
         finally:
@@ -866,6 +993,37 @@ class MediaCrawler:
                 overwrite=self.config.overwrite,
             )
             asset.path = result.combined_path or str(output / "hls")
+            asset.size = result.total_bytes
+            asset.status = 200
+            asset.downloaded = result.failed_segments == 0 and result.combined_path is not None
+            asset.details = result.summary()
+            if result.failed_segments:
+                asset.error = "; ".join(result.errors[:5])
+        except Exception as exc:
+            asset.error = str(exc)
+        finally:
+            client.close()
+            session.close()
+        return asset.to_dict()
+
+    def _download_dash(self, asset: MediaAsset, output: Path) -> dict[str, Any]:
+        from dash_client import DASHClient
+
+        self._media_limiter.wait()
+        session = self._new_session()
+        client = DASHClient(session=session)
+        try:
+            result = client.download(
+                asset.url,
+                output / "dash",
+                preferred_height=self.config.preferred_height,
+                max_bandwidth=self.config.max_bandwidth,
+                include_segments=True,
+                combine=True,
+                save_manifest=True,
+                overwrite=self.config.overwrite,
+            )
+            asset.path = result.combined_path or str(output / "dash")
             asset.size = result.total_bytes
             asset.status = 200
             asset.downloaded = result.failed_segments == 0 and result.combined_path is not None
@@ -985,6 +1143,12 @@ def _classify_media_url(url: str) -> str | None:
     lower = url.lower()
     if ".m3u8" in lower:
         return "hls"
+    if ".mpd" in lower or "format=mpd" in lower:
+        return "dash"
+    if ".ism/manifest" in lower or (
+        "manifest" in lower and "format=mp4" in lower
+    ):
+        return "smooth"
     suffix = Path(urllib.parse.urlsplit(url).path).suffix.lower()
     if suffix in _IMAGE_EXTS:
         return "image"
@@ -992,6 +1156,18 @@ def _classify_media_url(url: str) -> str | None:
         return "video"
     if suffix in _AUDIO_EXTS:
         return "audio"
+    if suffix in _SUBTITLE_EXTS:
+        return "subtitle"
+    if suffix == ".css":
+        return "css"
+    if suffix in {".js", ".mjs"}:
+        return "js"
+    if suffix in _FONT_EXTS:
+        return "font"
+    if suffix in _DOCUMENT_EXTS:
+        return "file"
+    if suffix in _DATA_EXTS:
+        return "data"
     return None
 
 

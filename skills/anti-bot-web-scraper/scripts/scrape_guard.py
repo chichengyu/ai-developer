@@ -57,9 +57,14 @@ class RetryPolicy:
     base_delay: float = 0.5
     max_delay: float = 30.0
     retry_on_status: tuple[int, ...] = _RETRY_STATUSES
+    retry_on_block: bool = False
 
     def should_retry(self, status: int, attempt: int) -> bool:
-        return attempt < self.max_retries and status in self.retry_on_status
+        if attempt >= self.max_retries:
+            return False
+        if status in self.retry_on_status:
+            return True
+        return bool(self.retry_on_block and status in (403, 401))
 
     def sleep_before_retry(
         self,

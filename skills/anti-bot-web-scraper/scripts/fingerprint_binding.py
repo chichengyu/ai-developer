@@ -9,10 +9,28 @@ Firefox.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from fingerprint_bank import BrowserFingerprint, HeaderFingerprint
+
+
+def _ua_version(user_agent: str, browser_family: str) -> str | None:
+    ua = user_agent.lower()
+    if browser_family == "safari":
+        pattern = r"version/(\d+)"
+    elif browser_family == "firefox":
+        pattern = r"firefox/(\d+)"
+    else:
+        pattern = r"chrome/(\d+)"
+    match = re.search(pattern, ua)
+    return match.group(1) if match else None
+
+
+def _tls_version(tls_impersonate: str) -> str | None:
+    match = re.search(r"(\d+)", tls_impersonate)
+    return match.group(1) if match else None
 
 
 @dataclass(frozen=True)
@@ -170,6 +188,13 @@ class FingerprintBinding:
             issues.append("Firefox binding uses a non-Firefox TLS impersonation target")
         if self.browser_family == "chrome" and "chrome" not in self.tls_impersonate.lower():
             issues.append("Chrome binding uses a non-Chrome TLS impersonation target")
+        ua_version = _ua_version(self.user_agent, self.browser_family)
+        tls_version = _tls_version(self.tls_impersonate)
+        if ua_version is not None and tls_version is not None and ua_version != tls_version:
+            issues.append(
+                f"TLS impersonation version {tls_version} does not match "
+                f"user agent version {ua_version}"
+            )
         if not self.user_agent:
             issues.append("user agent is empty")
         return issues
@@ -222,6 +247,42 @@ BINDINGS: dict[str, FingerprintBinding] = {
         (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        (
+            "patchright",
+            "nodriver",
+            "drission_page",
+            "seleniumbase",
+            "undetected_chromedriver",
+            "selenium",
+        ),
+    ),
+    "chrome120": _binding(
+        "chrome120",
+        "chrome",
+        "chrome",
+        "chrome_120",
+        (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        (
+            "patchright",
+            "nodriver",
+            "drission_page",
+            "seleniumbase",
+            "undetected_chromedriver",
+            "selenium",
+        ),
+    ),
+    "edge124": _binding(
+        "edge124",
+        "chrome",
+        "edge",
+        "chrome_124",
+        (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"
         ),
         (
             "patchright",
@@ -292,9 +353,9 @@ def resolve_binding(value: str | dict[str, Any] | FingerprintBinding | None) -> 
     if key in BINDINGS:
         return BINDINGS[key]
     family_aliases = {
-        "chrome": "chrome126",
-        "chromium": "chrome126",
-        "edge": "edge126",
+        "chrome": "chrome124",
+        "chromium": "chrome124",
+        "edge": "edge124",
         "firefox": "firefox127",
         "ff": "firefox127",
         "safari": "safari17",

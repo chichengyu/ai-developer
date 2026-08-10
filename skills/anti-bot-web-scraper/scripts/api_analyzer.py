@@ -219,13 +219,18 @@ def analyze_captures(
     """Produce an API manifest from one or more PageCapture objects."""
     sources: list[str] = []
     specs: list[ApiSpec] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for capture in captures:
         url = _get(capture, "url", None)
         if url:
             sources.append(str(url))
         for spec in build_api_specs(capture, max_specs=max_endpoints):
-            key = (spec.method.upper(), spec.url)
+            body_key = (
+                json.dumps(spec.body, sort_keys=True, ensure_ascii=False, default=str)
+                if spec.body is not None
+                else ""
+            )
+            key = (spec.method.upper(), spec.url, body_key)
             if key not in seen:
                 seen.add(key)
                 specs.append(spec)

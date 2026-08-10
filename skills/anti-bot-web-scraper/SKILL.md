@@ -11,8 +11,17 @@ This skill ships a complete web data pipeline that starts with a plain HTTP
 request and escalates automatically through TLS impersonation, Cloudflare
 challenge solvers, and a cycling stealth-browser loop until it returns usable
 HTML or API JSON. It also covers WAF vendor handling, CAPTCHA solving,
-proxies, login, media/HLS acquisition, deep crawling, API discovery, data
-processing, metrics, and daemonized production runs.
+proxies, login, media/HLS/DASH/Smooth acquisition, container metadata and
+subtitle parsing, CSS/JS/font/data asset crawling, deep crawling, API
+discovery, WebSocket/SSE real-time capture, DOM/JS event capture, data
+processing, automatic parameter recognition and fill, metrics, and
+daemonized production runs.
+
+The pipeline defaults to `auto` mode: adaptive HTTP backends, consistent
+fingerprinting, stealth-browser escalation on blocks, and no-key CAPTCHA
+handling. Without a CAPTCHA API key it still runs: browser auto-click for
+non-interactive Cloudflare/Turnstile challenges and auto-discovered local OCR
+for image CAPTCHAs. Optional provider keys and proxy pools remain compatible.
 
 ## Quick start
 
@@ -21,6 +30,9 @@ Install optional dependencies automatically:
 ```powershell
 python scripts/ensure_web_fetch_dependencies.py
 ```
+
+In `auto` mode, missing HTTP, OCR, and browser dependencies are also
+installed on demand when a feature is first used.
 
 Run one JSON-config pipeline:
 
@@ -48,6 +60,7 @@ full pipeline reference.
 | Adaptive HTTP backends | `Adaptive fetch backends` |
 | Cloudflare mechanisms and config | `Cloudflare mechanisms and handling` |
 | Stealth browser escalation | `Stealth browser escalation` |
+| Browser containers | `Browser containers` |
 | Full-chain fingerprint binding | `Full-chain fingerprint binding` |
 | Deep challenge bypass strategy | `Deep challenge bypass strategy` |
 | Vendor WAF classification | `Vendor-specific WAF intelligence` |
@@ -76,6 +89,21 @@ full pipeline reference.
 | Turnstile containers | `Deep Turnstile container handling` |
 | Security classification | `Security detection` |
 | Deep crawling | `Deep crawling` |
+| One-URL full-site crawl | `One-URL full-site crawl` |
+| Multi-site parallel crawl | `Multi-site parallel crawl` |
+| Risk-aware pacing / backoff | `Multi-site parallel crawl` |
+| Site-level retry with backoff | `Multi-site parallel crawl` |
+| Blocked-page recovery / backend rotation | `One-URL full-site crawl` |
+| API-level block retry / proxy rotation | `API fetching and pagination` |
+| Subpage API parameter augmentation | `Subpage API parameter augmentation` |
+| Whole-site API index | `Subpage API parameter augmentation` |
+| Response-driven parameter chaining | `Response-driven parameter chaining` |
+| API header fingerprinting | `API fetching and pagination` |
+| JS body / GraphQL parsing | `Page/API analysis` |
+| WebSocket / SSE parsing | `Page/API analysis` |
+| Real-time event capture | `Real-time event capture` |
+| DOM / JS event discovery | `Page/API analysis` |
+| Browser event trigger / storage params | `Real-time event capture` |
 | Page/API analysis | `Page/API analysis` |
 | API fetching and pagination | `API fetching and pagination` |
 | Data processing | `Data processing` |

@@ -150,6 +150,9 @@ class AutonomousCrawler:
             "blocked": 0,
             "records": 0,
             "media": 0,
+            "assets": 0,
+            "streams": 0,
+            "events": 0,
             "errors": 0,
         }
         self._stop = False
@@ -317,12 +320,7 @@ class AutonomousCrawler:
             self._stats["records"] += 1
             await self._write_record({"kind": "record", **record})
         if self.config.output_media:
-            for kind, values in (
-                ("image", analysis.media.images),
-                ("video", analysis.media.videos),
-                ("audio", analysis.media.audios),
-                ("hls", analysis.media.hls),
-            ):
+            async def write_media(kind: str, values: list[str]) -> None:
                 for media_url in values:
                     self._stats["media"] += 1
                     await self._write_record(
@@ -334,6 +332,58 @@ class AutonomousCrawler:
                             "depth": depth,
                         }
                     )
+
+            for kind, values in (
+                ("image", analysis.media.images),
+                ("video", analysis.media.videos),
+                ("audio", analysis.media.audios),
+                ("hls", analysis.media.hls),
+                ("dash", analysis.media.dash),
+                ("smooth", analysis.media.smooth),
+            ):
+                await write_media(kind, values)
+            from media_crawler import _classify_media_url
+
+            for link_url in analysis.media.links:
+                kind = _classify_media_url(link_url)
+                if kind:
+                    await write_media(kind, [link_url])
+
+            for asset_kind, values in (analysis.assets or {}).items():
+                for asset_url in values:
+                    self._stats["assets"] += 1
+                    await self._write_record(
+                        {
+                            "kind": "asset",
+                            "asset_type": asset_kind,
+                            "url": asset_url,
+                            "source_page": url,
+                            "depth": depth,
+                        }
+                    )
+
+            for stream in analysis.streams:
+                self._stats["streams"] += 1
+                await self._write_record(
+                    {
+                        "kind": "stream",
+                        "url": stream.get("url") if isinstance(stream, dict) else getattr(stream, "url", ""),
+                        "method": stream.get("method") if isinstance(stream, dict) else getattr(stream, "method", ""),
+                        "source_page": url,
+                        "depth": depth,
+                    }
+                )
+
+            for event in analysis.events:
+                self._stats["events"] += 1
+                await self._write_record(
+                    {
+                        "kind": "event",
+                        "event": event,
+                        "source_page": url,
+                        "depth": depth,
+                    }
+                )
         if depth < self.config.max_depth:
             for link in analysis.media.links:
                 normalized = self._normalize_url(link, url)

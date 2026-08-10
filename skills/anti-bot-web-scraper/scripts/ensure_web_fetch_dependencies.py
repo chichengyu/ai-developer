@@ -16,12 +16,13 @@
 - `DrissionPage` -- Chromium automation with a self-developed core
 - `selenium` -- Selenium WebDriver with stealth injection
 - `cryptography` -- AES decryption for encrypted HLS segments
+- `pillow` / `ddddocr` -- optional local image CAPTCHA OCR
 
 The CLI defaults to automatic mode: it checks for missing packages and
 installs them with pip. Use `--check` to only report status without
 downloading anything, or `--http-only` to skip the stealth-browser packages.
-This script deliberately does not install Playwright's Chromium or ffmpeg;
-use `media_dependencies.py --install` for those.
+This script deliberately does not download large browser binaries; use
+`ensure_browser_binaries.py --install` when a Camoufox browser is needed.
 """
 
 from __future__ import annotations
@@ -45,6 +46,8 @@ SELENIUM_PACKAGES = (
 )
 ADVANCED_BROWSER_PACKAGES = ("camoufox", "scrapling", "msgspec")
 MEDIA_PACKAGES = ("cryptography",)
+OCR_PACKAGES = ("pillow", "ddddocr")
+OCR_TESSERACT_PACKAGES = ("pillow", "pytesseract")
 ALL_WEB_FETCH_PACKAGES = (
     *WEB_FETCH_PACKAGES,
     *STEALTH_BROWSER_PACKAGES,
@@ -59,6 +62,7 @@ WEB_FETCH_LABELS = {
     "httpx": "HTTP/2 client",
     "h2": "HTTP/2 protocol support",
     "patchright": "undetected Playwright (drop-in sync API)",
+    "playwright": "standard Playwright automation fallback",
     "nodriver": "CDP-only Chromium automation, no WebDriver",
     "DrissionPage": "Chromium automation with a self-developed core",
     "selenium": "standard Selenium WebDriver",
@@ -70,6 +74,13 @@ WEB_FETCH_LABELS = {
     "scrapling": "Scrapling stealth fetcher (Patchright / Camoufox)",
     "msgspec": "Scrapling dependency for stealth engine config validation",
     "cryptography": "AES decryption for encrypted HLS segments",
+    "pillow": "image processing for local CAPTCHA OCR",
+    "ddddocr": "self-contained OCR model for local CAPTCHA solving",
+    "pytesseract": "Tesseract OCR adapter for local CAPTCHA solving",
+    "rapidocr_onnxruntime": "RapidOCR ONNX engine for local CAPTCHA solving",
+    "easyocr": "EasyOCR engine for local CAPTCHA solving",
+    "paddleocr": "PaddleOCR engine for local CAPTCHA solving",
+    "cnocr": "CnOcr engine for Chinese CAPTCHA solving",
 }
 ProgressFn = Callable[[str, float | None, str], None]
 
@@ -83,14 +94,18 @@ def _noop_progress(stage: str, percent: float | None, message: str) -> None:
 
 
 def _module_available(name: str) -> bool:
+    import_name = "PIL" if name.lower() == "pillow" else name
     try:
-        return importlib.util.find_spec(name) is not None
+        return importlib.util.find_spec(import_name) is not None
     except (ImportError, ValueError):
         return False
 
 
-def check_status() -> dict[str, Any]:
-    """Return installed status for every optional web-fetch package."""
+def check_status(
+    packages: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Return installed status for the requested web-fetch packages."""
+    wanted = tuple(packages) if packages else ALL_WEB_FETCH_PACKAGES
     return {
         "python": sys.executable,
         "packages": [
@@ -99,9 +114,9 @@ def check_status() -> dict[str, Any]:
                 "installed": _module_available(name),
                 "description": WEB_FETCH_LABELS[name],
             }
-            for name in ALL_WEB_FETCH_PACKAGES
+            for name in wanted
         ],
-        "ready": all(_module_available(name) for name in ALL_WEB_FETCH_PACKAGES),
+        "ready": all(_module_available(name) for name in wanted),
     }
 
 
@@ -120,9 +135,9 @@ def ensure(
     wanted = tuple(packages) if packages else ALL_WEB_FETCH_PACKAGES
     missing = [name for name in wanted if not _module_available(name)]
     if not missing:
-        return check_status()
+        return check_status(wanted)
     if not install:
-        return check_status()
+        return check_status(wanted)
 
     report(
         "ensure",
@@ -153,7 +168,7 @@ def ensure(
         from ensure_browser_binaries import ensure as ensure_browser_binaries
 
         ensure_browser_binaries(install=True, progress=report)
-    status = check_status()
+    status = check_status(wanted)
     report("done", 1.0, "web-fetch dependencies ready")
     return status
 
@@ -189,6 +204,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="only check/install media processing packages (HLS decryption)",
     )
+    parser.add_argument(
+        "--ocr-only",
+        action="store_true",
+        help="only check/install local CAPTCHA OCR packages",
+    )
     args = parser.parse_args(argv)
     packages = (
         [item.strip() for item in args.packages.split(",") if item.strip()]
@@ -205,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         ]
     elif args.media_only and packages is None:
         packages = list(MEDIA_PACKAGES)
+    elif args.ocr_only and packages is None:
+        packages = list(OCR_PACKAGES)
     result = ensure(install=not args.check, packages=packages)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ready") or args.check else 1

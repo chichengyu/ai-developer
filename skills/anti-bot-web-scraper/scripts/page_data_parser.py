@@ -96,9 +96,19 @@ class ApiEndpoint:
     method: str
     url: str
     source: str
+    body: Any = None
+    params: dict[str, Any] | None = None
+    content_type: str | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        return {"method": self.method, "url": self.url, "source": self.source}
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "url": self.url,
+            "source": self.source,
+            "body": self.body,
+            "params": self.params,
+            "content_type": self.content_type,
+        }
 
 
 @dataclass
@@ -112,6 +122,24 @@ class ApiField:
 
 
 @dataclass
+class FormField:
+    action: str
+    method: str
+    name: str
+    value: str = ""
+    type: str = "text"
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "action": self.action,
+            "method": self.method,
+            "name": self.name,
+            "value": self.value,
+            "type": self.type,
+        }
+
+
+@dataclass
 class PageDataAnalysis:
     url: str | None = None
     metadata: PageMetadata = field(default_factory=PageMetadata)
@@ -119,10 +147,14 @@ class PageDataAnalysis:
     embedded_json: list[EmbeddedJson] = field(default_factory=list)
     json_media: MediaExtraction = field(default_factory=MediaExtraction)
     json_api_fields: list[ApiField] = field(default_factory=list)
+    form_fields: list[FormField] = field(default_factory=list)
     api_endpoints: list[ApiEndpoint] = field(default_factory=list)
+    streams: list[dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
     pagination: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     captchas: list[CaptchaChallenge] = field(default_factory=list)
     links: list[str] = field(default_factory=list)
+    assets: dict[str, list[str]] = field(default_factory=dict)
     login: LoginDetection | None = None
 
     def to_dict(self, include_data: bool = True) -> dict[str, Any]:
@@ -130,6 +162,7 @@ class PageDataAnalysis:
             "url": self.url,
             "metadata": self.metadata.to_dict(),
             "media": _media_lists(self.media),
+            "assets": self.assets,
             "links": list(self.links[:_MAX_LINKS]),
             "embedded_json": [
                 item.to_dict() if include_data else _json_block_summary(item)
@@ -137,7 +170,10 @@ class PageDataAnalysis:
             ],
             "json_media": _media_lists(self.json_media),
             "json_api_fields": [item.to_dict() for item in self.json_api_fields],
+            "form_fields": [item.to_dict() for item in self.form_fields[:_MAX_API_FIELDS]],
             "api_endpoints": [item.to_dict() for item in self.api_endpoints],
+            "streams": self.streams,
+            "events": self.events,
             "pagination": self.pagination,
             "captchas": [item.to_dict() for item in self.captchas],
             "login": self.login.to_dict() if self.login else None,
@@ -148,11 +184,15 @@ class PageDataAnalysis:
             "url": self.url,
             "metadata": self.metadata.to_dict(),
             "media": _media_counts(self.media),
+            "assets": {key: len(value) for key, value in self.assets.items()},
             "links": list(self.links[:_MAX_LINKS]),
             "json_media": _media_counts(self.json_media),
             "embedded_json": [_json_block_summary(item) for item in self.embedded_json],
             "api_endpoints": [item.to_dict() for item in self.api_endpoints[:_MAX_ENDPOINTS]],
             "json_api_fields": [item.to_dict() for item in self.json_api_fields[:_MAX_API_FIELDS]],
+            "form_fields": [item.to_dict() for item in self.form_fields[:_MAX_API_FIELDS]],
+            "streams": self.streams[:_MAX_ENDPOINTS],
+            "events": self.events[:_MAX_ENDPOINTS],
             "pagination": {
                 key: values[:_MAX_PAGINATION_PER_KEY] for key, values in self.pagination.items()
             },
@@ -170,6 +210,9 @@ class _PageHTMLParser(HTMLParser):
         self.meta: dict[str, str] = {}
         self.links: list[tuple[str, str]] = []
         self.forms: list[tuple[str, str]] = []
+        self.form_fields: list[FormField] = []
+        self.dom_events: list[dict[str, Any]] = []
+        self._form_stack: list[dict[str, str]] = []
         self.script_srcs: list[str] = []
         self.script_blocks: list[tuple[str | None, str | None, str]] = []
         self._script_id: str | None = None
@@ -181,6 +224,25 @@ class _PageHTMLParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = {name.lower(): value or "" for name, value in attrs}
         tag = tag.lower()
+        selector = ""
+        if attr_map.get("id"):
+            selector = f"#{attr_map['id']}"
+        elif attr_map.get("name"):
+            selector = f"[name={attr_map['name']!r}]"
+        elif attr_map.get("class"):
+            selector = "." + attr_map["class"].split()[0]
+        else:
+            selector = tag
+        for key, value in attr_map.items():
+            if key.startswith("on") and len(key) > 2 and value:
+                self.dom_events.append(
+                    {
+                        "event": key[2:],
+                        "target": selector,
+                        "handler": value[:300],
+                        "source": "html",
+                    }
+                )
         if tag == "html":
             self.html_lang = attr_map.get("lang") or None
         elif tag == "base":
@@ -202,6 +264,22 @@ class _PageHTMLParser(HTMLParser):
             action = (attr_map.get("action") or "").strip()
             if action:
                 self.forms.append((method, action))
+                self._form_stack.append({"method": method, "action": action})
+        elif tag in {"input", "select", "textarea"} and self._form_stack:
+            form = self._form_stack[-1]
+            name = attr_map.get("name") or attr_map.get("id") or ""
+            if name:
+                field_type = attr_map.get("type") or tag
+                value = attr_map.get("value") or ""
+                self.form_fields.append(
+                    FormField(
+                        action=form["action"],
+                        method=form["method"],
+                        name=name,
+                        value=value,
+                        type=field_type,
+                    )
+                )
         elif tag == "script":
             src = (attr_map.get("src") or "").strip()
             if src:
@@ -227,6 +305,8 @@ class _PageHTMLParser(HTMLParser):
             self._in_script = False
             self._script_id = None
             self._script_type = None
+        elif tag == "form" and self._form_stack:
+            self._form_stack.pop()
         elif tag == "title":
             self._in_title = False
 
@@ -242,13 +322,15 @@ _GLOBAL_STATE_PATTERNS = (
 )
 
 _FETCH_RE = re.compile(
-    r"\bfetch\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)" r"(?P<opts>\s*,\s*\{[^}]*\})?",
-    re.IGNORECASE,
+    r"\bfetch\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)"
+    r"(?P<opts>\s*,\s*(?P<object>\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}))?",
+    re.IGNORECASE | re.DOTALL,
 )
 _AXIOS_RE = re.compile(
     r"\baxios\s*\.\s*(?P<method>get|post|put|patch|delete|head|options|request)"
-    r"\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
-    re.IGNORECASE,
+    r"\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)"
+    r"(?P<rest>\s*,\s*(?P<object>\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}))?",
+    re.IGNORECASE | re.DOTALL,
 )
 _XHR_RE = re.compile(
     r"\.open\s*\(\s*(?P<q1>[\"'])(?P<method>GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)"
@@ -259,6 +341,10 @@ _JQUERY_RE = re.compile(
     r"\$\s*\.\s*ajax\s*\(\s*\{[^}]*?url\s*:\s*(?P<quote>[\"'`])" r"(?P<url>[^\"'`]+)(?P=quote)",
     re.IGNORECASE,
 )
+_OBJECT_URL_RE = re.compile(
+    r"\burl\s*:\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
 _HTTP_RE = re.compile(
     r"\bhttp\s*\.\s*(?P<method>get|post|put|patch|delete|head|options|request)"
     r"\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
@@ -266,6 +352,20 @@ _HTTP_RE = re.compile(
 )
 _WEBSOCKET_RE = re.compile(
     r"new\s+WebSocket\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_EVENTSOURCE_RE = re.compile(
+    r"new\s+EventSource\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_WS_SEND_RE = re.compile(
+    r"\.send\s*\(\s*(?P<value>JSON\.stringify\s*\(\s*(\{.*?\})\s*\)"
+    r"|`[^`]*`|\"[^\"]*\"|'[^']*')",
+    re.DOTALL | re.IGNORECASE,
+)
+_EVENT_BIND_RE = re.compile(
+    r"(?:addEventListener|\.on|\.bind|\.delegate|\.live)\s*\(\s*"
+    r"(?P<quote>['\"])(?P<event>[^'\"]+)(?P=quote)",
     re.IGNORECASE,
 )
 _METHOD_IN_OPTIONS_RE = re.compile(
@@ -279,6 +379,28 @@ _JQUERY_METHOD_RE = re.compile(
     re.IGNORECASE,
 )
 _UNDEFINED_RE = re.compile(r"(?<![\w\"'])undefined(?![\w\"'])")
+_FETCH_BODY_RE = re.compile(
+    r"\b(?:body|data)\s*:\s*(?P<value>JSON\.stringify\s*\(\s*(\{.*?\})\s*\)"
+    r"|`[^`]*`|\"[^\"]*\"|'[^']*'|\{.*?\})",
+    re.DOTALL | re.IGNORECASE,
+)
+_PARAMS_RE = re.compile(
+    r"\bparams\s*:\s*(\{.*?\})",
+    re.DOTALL,
+)
+_CONTENT_TYPE_RE = re.compile(
+    r"\b(?:headers\s*:\s*\{[^}]*?)?(?:\"Content-Type\"|Content-Type)\s*:\s*"
+    r"(?P<quote>[\"'])(?P<value>[^\"']+)(?P=quote)",
+    re.IGNORECASE,
+)
+_GRAPHQL_OP_RE = re.compile(
+    r"(?P<op>query|mutation)\s+(?P<name>\w+)\s*(?:\((?P<args>[^)]*)\))?\s*(?P<body>\{.*\})",
+    re.DOTALL | re.IGNORECASE,
+)
+_AXIOS_REQUEST_OBJECT_RE = re.compile(
+    r"\baxios\s*\.\s*request\s*\(\s*\{(?P<config>.*?)\}\s*\)",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 def _loads_json(text: str) -> Any:
@@ -403,10 +525,8 @@ def _looks_like_url(value: str) -> bool:
 
 
 def _normalize_endpoint_url(url: str, base: str | None) -> str | None:
-    value = url.strip()
+    value = re.sub(r"\$\{([^}]+)\}", r"{\1}", url.strip())
     if not value or value.startswith("#"):
-        return None
-    if "${" in value or "{" in value or "}" in value:
         return None
     return normalize_url(value, base)
 
@@ -421,24 +541,254 @@ def _jquery_method(block: str) -> str | None:
     return match.group("method").upper() if match else None
 
 
+def _parse_js_object(text: str) -> Any:
+    value = text.strip()
+    if not value:
+        return None
+    if value[0] in {"'", '"', "`"} and value[-1] == value[0]:
+        value = value[1:-1].strip()
+    if value.startswith(("{", "[")):
+        normalized = re.sub(
+            r"([{,]\s*)([A-Za-z_$][\w$]*)\s*:",
+            r'\1"\2":',
+            value,
+        )
+        normalized = re.sub(
+            r"(['\"])([^'\"]+)(['\"])\s*:",
+            r'"\2":',
+            normalized,
+        )
+        normalized = normalized.replace("'", '"')
+        normalized = re.sub(r",\s*([}\]])", r"\1", normalized)
+        normalized = re.sub(r"\bundefined\b", "null", normalized)
+        try:
+            return json.loads(normalized)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _extract_body_from_options(options: str) -> Any:
+    if not options:
+        return None
+    match = _FETCH_BODY_RE.search(options)
+    if match is None:
+        return None
+    raw = match.group("value").strip()
+    if raw.startswith("JSON.stringify"):
+        inner = re.search(r"\(\s*(\{.*\})\s*\)\s*$", raw, re.DOTALL)
+        if inner:
+            return _parse_js_object(inner.group(1))
+    return _parse_js_object(raw)
+
+
+def _extract_params_from_options(options: str) -> dict[str, Any] | None:
+    match = _PARAMS_RE.search(options)
+    if match is None:
+        return None
+    parsed = _parse_js_object(match.group(1))
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _extract_content_type(options: str) -> str | None:
+    match = _CONTENT_TYPE_RE.search(options)
+    return match.group("value") if match else None
+
+
+def _axios_body_from_rest(method: str, rest: str) -> Any:
+    stripped = rest.strip()
+    if stripped.startswith(","):
+        candidate = stripped[1:].strip()
+        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+            match = re.match(
+                r"(\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})",
+                candidate,
+                re.DOTALL,
+            )
+            if match:
+                return _parse_js_object(match.group(1))
+    return _extract_body_from_options(rest)
+
+
+def _extract_graphql_operations(script_text: str) -> list[dict[str, Any]]:
+    operations: list[dict[str, Any]] = []
+    for match in _GRAPHQL_OP_RE.finditer(script_text):
+        operation = match.group("op")
+        name = match.group("name")
+        args = match.group("args") or ""
+        body = match.group("body")
+        query = f"{operation} {name}"
+        if args:
+            query += f"({args})"
+        query += f" {body}"
+        variables = {
+            variable_name: None
+            for variable_name in re.findall(r"\$(\w+)", args)
+        }
+        operations.append(
+            {
+                "query": query,
+                "name": name,
+                "variables": variables,
+            }
+        )
+    return operations
+
+
+def _extract_ws_send_payloads(script_text: str) -> list[Any]:
+    payloads: list[Any] = []
+    for match in _WS_SEND_RE.finditer(script_text):
+        raw = match.group("value").strip()
+        if raw.startswith("JSON.stringify"):
+            inner = re.search(r"\(\s*(\{.*?\})\s*\)\s*$", raw, re.DOTALL)
+            payloads.append(_parse_js_object(inner.group(1)) if inner else None)
+        else:
+            payloads.append(_parse_js_object(raw))
+    return [payload for payload in payloads if payload is not None]
+
+
+def _extract_js_events(script_text: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    url_patterns = (
+        _FETCH_RE,
+        _AXIOS_RE,
+        _XHR_RE,
+        _JQUERY_RE,
+        _OBJECT_URL_RE,
+        _HTTP_RE,
+        _WEBSOCKET_RE,
+        _EVENTSOURCE_RE,
+    )
+    for match in _EVENT_BIND_RE.finditer(script_text):
+        window_text = script_text[match.end() : match.end() + 500]
+        urls: list[str] = []
+        for pattern in url_patterns:
+            for url_match in pattern.finditer(window_text):
+                url = str(url_match.group("url"))
+                if url not in urls:
+                    urls.append(url)
+        events.append(
+            {
+                "event": match.group("event"),
+                "handler_urls": urls[:20],
+                "source": "js",
+            }
+        )
+    return events
+
+
 def _add_js_endpoints(
     script_text: str,
     base: str | None,
     add: Callable[[str, str, str], None],
 ) -> None:
+    graphql_ops = _extract_graphql_operations(script_text)
+    ws_payloads = _extract_ws_send_payloads(script_text)
+
+    def graphql_body(url: str) -> Any:
+        if "graphql" not in url.lower() or not graphql_ops:
+            return None
+        operation = graphql_ops[0]
+        return {
+            "query": operation["query"],
+            "variables": dict(operation["variables"]),
+        }
+
     for match in _FETCH_RE.finditer(script_text):
         options = match.group("opts") or ""
-        add(_method_from_options(options) or "GET", match.group("url"), "fetch")
+        url = match.group("url")
+        body = _extract_body_from_options(options)
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            _method_from_options(options) or "GET",
+            url,
+            "fetch",
+            body=body,
+            params=_extract_params_from_options(options),
+            content_type=_extract_content_type(options),
+        )
     for match in _AXIOS_RE.finditer(script_text):
-        add(match.group("method").upper(), match.group("url"), "axios")
+        method = match.group("method").upper()
+        url = match.group("url")
+        rest = match.group("rest") or ""
+        body = _axios_body_from_rest(method, rest)
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            method,
+            url,
+            "axios",
+            body=body,
+            params=_extract_params_from_options(rest),
+            content_type=_extract_content_type(rest),
+        )
+    for match in _AXIOS_REQUEST_OBJECT_RE.finditer(script_text):
+        config = match.group("config")
+        url_match = re.search(
+            r"\burl\s*:\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+            config,
+        )
+        if url_match is None:
+            continue
+        url = url_match.group("url")
+        body = _extract_body_from_options(config)
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            _method_from_options(config) or "GET",
+            url,
+            "axios-request",
+            body=body,
+            params=_extract_params_from_options(config),
+            content_type=_extract_content_type(config),
+        )
     for match in _XHR_RE.finditer(script_text):
         add(match.group("method").upper(), match.group("url"), "xhr")
     for match in _JQUERY_RE.finditer(script_text):
-        add(_jquery_method(match.group(0)) or "GET", match.group("url"), "ajax")
+        url = match.group("url")
+        body = _extract_body_from_options(match.group(0))
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            _jquery_method(match.group(0)) or "GET",
+            url,
+            "ajax",
+            body=body,
+            params=_extract_params_from_options(match.group(0)),
+            content_type=_extract_content_type(match.group(0)),
+        )
+    for match in _OBJECT_URL_RE.finditer(script_text):
+        url = match.group("url")
+        add("GET", url, "object-url", body=graphql_body(url))
     for match in _HTTP_RE.finditer(script_text):
-        add(match.group("method").upper(), match.group("url"), "http-client")
+        url = match.group("url")
+        body = _extract_body_from_options(match.group(0))
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            match.group("method").upper(),
+            url,
+            "http-client",
+            body=body,
+            params=_extract_params_from_options(match.group(0)),
+            content_type=_extract_content_type(match.group(0)),
+        )
     for match in _WEBSOCKET_RE.finditer(script_text):
-        add("WS", match.group("url"), "websocket")
+        add(
+            "WS",
+            match.group("url"),
+            "websocket",
+            body=ws_payloads[0] if ws_payloads else None,
+            content_type="application/json" if ws_payloads else None,
+        )
+    for match in _EVENTSOURCE_RE.finditer(script_text):
+        add(
+            "SSE",
+            match.group("url"),
+            "event-source",
+            content_type="text/event-stream",
+        )
 
 
 def _walk_api_fields(
@@ -472,17 +822,35 @@ def _extract_endpoints_from_parser(
     embedded_json: list[EmbeddedJson],
 ) -> list[ApiEndpoint]:
     endpoints: list[ApiEndpoint] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
 
-    def add(method: str, url: str, source: str) -> None:
+    def add(
+        method: str,
+        url: str,
+        source: str,
+        *,
+        body: Any = None,
+        params: dict[str, Any] | None = None,
+        content_type: str | None = None,
+    ) -> None:
         normalized = _normalize_endpoint_url(url, base)
         if normalized is None:
             return
-        key = (method.upper(), normalized)
+        body_key = json.dumps(body, sort_keys=True, ensure_ascii=False, default=str) if body else ""
+        key = (method.upper(), normalized, body_key)
         if key in seen:
             return
         seen.add(key)
-        endpoints.append(ApiEndpoint(method=method.upper(), url=normalized, source=source))
+        endpoints.append(
+            ApiEndpoint(
+                method=method.upper(),
+                url=normalized,
+                source=source,
+                body=body,
+                params=params,
+                content_type=content_type,
+            )
+        )
 
     for src in parser.script_srcs:
         add("GET", src, "script-src")
@@ -509,6 +877,8 @@ def _extract_endpoints_from_parser(
 
 
 _HLS_KEYS = frozenset({"hls", "m3u8", "playlist", "playlisturl", "playurl"})
+_DASH_KEYS = frozenset({"dash", "mpd", "manifest"})
+_SMOOTH_KEYS = frozenset({"smooth", "ism", "manifesturl"})
 _AUDIO_KEYS = frozenset({"audio", "audios", "audiourl", "mp3", "sound", "music", "track", "tracks"})
 _VIDEO_KEYS = frozenset(
     {
@@ -626,6 +996,12 @@ def _classify_json_media(key: str, value: str) -> str | None:
     lower = value.lower()
     if ".m3u8" in lower or key in _HLS_KEYS:
         return "hls"
+    if ".mpd" in lower or "format=mpd" in lower or key in _DASH_KEYS:
+        return "dash"
+    if ".ism/manifest" in lower or (
+        "manifest" in lower and "format=mp4" in lower
+    ) or key in _SMOOTH_KEYS:
+        return "smooth"
     if lower.endswith(_AUDIO_EXTS) or key in _AUDIO_KEYS:
         return "audio"
     if lower.endswith(_VIDEO_EXTS) or key in _VIDEO_KEYS:
@@ -668,6 +1044,10 @@ def _handle_json_string(
     category = _classify_json_media(key_norm, value)
     if category == "hls":
         media.hls.append(normalized)
+    elif category == "dash":
+        media.dash.append(normalized)
+    elif category == "smooth":
+        media.smooth.append(normalized)
     elif category == "audio":
         media.audios.append(normalized)
     elif category == "video":
@@ -779,6 +1159,8 @@ def _media_counts(extraction: MediaExtraction) -> dict[str, int]:
         "audios": len(extraction.audios),
         "images": len(extraction.images),
         "hls": len(extraction.hls),
+        "dash": len(extraction.dash),
+        "smooth": len(extraction.smooth),
         "links": len(extraction.links),
     }
 
@@ -789,6 +1171,8 @@ def _media_lists(extraction: MediaExtraction) -> dict[str, list[str]]:
         "audios": list(extraction.audios),
         "images": list(extraction.images),
         "hls": list(extraction.hls),
+        "dash": list(extraction.dash),
+        "smooth": list(extraction.smooth),
         "links": list(extraction.links),
     }
 
@@ -837,6 +1221,50 @@ def analyze_page(html: str, base_url: str | None = None) -> PageDataAnalysis:
     embedded = _extract_embedded_from_parser(parser)
     json_media, json_api_fields, pagination = _digest_json(embedded, effective_base)
     media = extract_media_urls(html, base_url)
+    api_endpoints = _extract_endpoints_from_parser(parser, effective_base, embedded)
+    streams = [
+        endpoint.to_dict()
+        for endpoint in api_endpoints
+        if endpoint.method in {"WS", "SSE"}
+        or endpoint.source in {"websocket", "event-source"}
+    ]
+    js_events: list[dict[str, Any]] = []
+    for _, _, script_text in parser.script_blocks:
+        js_events.extend(_extract_js_events(script_text))
+    events = list(parser.dom_events) + js_events
+    asset_sets: dict[str, set[str]] = {
+        "css": set(),
+        "js": set(),
+        "fonts": set(),
+        "images": set(),
+        "data": set(),
+        "documents": set(),
+    }
+    for rel, href in parser.links:
+        asset_url = normalize_url(href, effective_base)
+        lower = asset_url.lower()
+        rel_norm = str(rel or "").lower()
+        if "stylesheet" in rel_norm or lower.endswith(".css"):
+            asset_sets["css"].add(asset_url)
+        elif "icon" in rel_norm or lower.endswith(
+            (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico")
+        ):
+            asset_sets["images"].add(asset_url)
+        elif lower.endswith((".js", ".mjs")):
+            asset_sets["js"].add(asset_url)
+        elif lower.endswith((".woff", ".woff2", ".ttf", ".otf", ".eot")):
+            asset_sets["fonts"].add(asset_url)
+        elif lower.endswith((".json", ".xml", ".csv")):
+            asset_sets["data"].add(asset_url)
+        elif rel_norm in {"preload", "prefetch"} or lower.endswith(
+            (".pdf", ".zip", ".rar", ".7z", ".doc", ".docx", ".xls", ".xlsx")
+        ):
+            asset_sets["documents"].add(asset_url)
+        else:
+            asset_sets["documents"].add(asset_url)
+    for src in parser.script_srcs:
+        asset_sets["js"].add(normalize_url(src, effective_base))
+    assets = {key: sorted(value) for key, value in asset_sets.items()}
     return PageDataAnalysis(
         url=base_url,
         metadata=_build_metadata(parser, base_url, effective_base),
@@ -844,7 +1272,11 @@ def analyze_page(html: str, base_url: str | None = None) -> PageDataAnalysis:
         embedded_json=embedded,
         json_media=json_media,
         json_api_fields=json_api_fields,
-        api_endpoints=_extract_endpoints_from_parser(parser, effective_base, embedded),
+        form_fields=list(parser.form_fields),
+        api_endpoints=api_endpoints,
+        streams=streams,
+        events=events,
+        assets=assets,
         pagination=pagination,
         captchas=detect_captchas(html, base_url),
         links=list(media.links),

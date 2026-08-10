@@ -361,6 +361,31 @@ class HeaderFingerprint:
             merged.setdefault(key, value)
         return merged
 
+    def api(self) -> HeaderFingerprint:
+        """Return an API-request variant with browser-consistent fetch headers."""
+        headers = dict(self.headers)
+        headers["Accept"] = "application/json, text/plain, */*"
+        headers["Sec-Fetch-Dest"] = "empty"
+        headers["Sec-Fetch-Mode"] = "cors"
+        headers["Sec-Fetch-Site"] = "same-origin"
+        headers.pop("Sec-Fetch-User", None)
+        headers.pop("Upgrade-Insecure-Requests", None)
+        order = tuple(
+            item
+            for item in self.order
+            if item not in {"sec-fetch-user", "upgrade-insecure-requests"}
+        )
+        return HeaderFingerprint(
+            name=f"{self.name}-api",
+            headers=headers,
+            order=order,
+        )
+
+    def for_kind(self, kind: str | None) -> HeaderFingerprint:
+        if str(kind or "document").lower() == "api":
+            return self.api()
+        return self
+
 
 class FingerprintBank:
     """Rotate stable browser profiles for one task or session."""

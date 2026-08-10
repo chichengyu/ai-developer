@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from media_metadata import probe_media_file
+from media_parser import parse_css_assets, parse_js_assets
 from media_session import MediaSession
 
 DEFAULT_CHUNK_SIZE = 1024 * 1024
@@ -91,6 +93,10 @@ def _classify_url(url: str) -> str:
     lower = url.lower()
     if ".m3u8" in lower:
         return "hls"
+    if ".mpd" in lower or "format=mpd" in lower:
+        return "dash"
+    if ".ism/manifest" in lower or "format=mp4" in lower and "manifest" in lower:
+        return "smooth"
     suffix = Path(urllib.parse.urlsplit(url).path).suffix.lower()
     if suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif", ".ico"}:
         return "image"
@@ -98,6 +104,16 @@ def _classify_url(url: str) -> str:
         return "video"
     if suffix in {".mp3", ".aac", ".m4a", ".wav", ".flac", ".ogg", ".opus", ".wma"}:
         return "audio"
+    if suffix in {".vtt", ".srt", ".ass", ".ssa"}:
+        return "subtitle"
+    if suffix in {".css"}:
+        return "css"
+    if suffix in {".js", ".mjs"}:
+        return "js"
+    if suffix in {".woff", ".woff2", ".ttf", ".otf", ".eot"}:
+        return "font"
+    if suffix in {".json", ".xml", ".csv", ".txt"}:
+        return "data"
     return "resource"
 
 
@@ -138,6 +154,18 @@ class ResourceDownloader:
         if target.exists() and not overwrite:
             existing_size = target.stat().st_size
             if total_size is not None and existing_size == total_size:
+                metadata = probe_media_file(target)
+                details: dict[str, Any] = {"kind": kind, "metadata": metadata}
+                if kind == "css":
+                    details["nested_assets"] = parse_css_assets(
+                        target.read_text(encoding="utf-8", errors="replace"),
+                        url,
+                    )
+                elif kind == "js":
+                    details["nested_assets"] = parse_js_assets(
+                        target.read_text(encoding="utf-8", errors="replace"),
+                        url,
+                    )
                 return ResourceDownloadResult(
                     url=url,
                     path=str(target),
@@ -145,7 +173,7 @@ class ResourceDownloader:
                     status=probe.status,
                     content_type=content_type,
                     skipped=True,
-                    details={"kind": kind},
+                    details=details,
                 )
         start = target.stat().st_size if resume and target.exists() else 0
         if start and total_size is not None and start >= total_size:
@@ -210,6 +238,18 @@ class ResourceDownloader:
                 error="SHA-256 mismatch",
                 details={"expected": expected_sha256, "actual": sha256, "kind": kind},
             )
+        metadata = probe_media_file(target)
+        details = {"kind": kind, "metadata": metadata}
+        if kind == "css":
+            details["nested_assets"] = parse_css_assets(
+                target.read_text(encoding="utf-8", errors="replace"),
+                url,
+            )
+        elif kind == "js":
+            details["nested_assets"] = parse_js_assets(
+                target.read_text(encoding="utf-8", errors="replace"),
+                url,
+            )
         return ResourceDownloadResult(
             url=url,
             path=str(target),
@@ -218,7 +258,7 @@ class ResourceDownloader:
             status=status,
             content_type=content_type,
             resumed=resumed,
-            details={"kind": kind},
+            details=details,
         )
 if __name__ == "__main__":
     print("resource_downloader: streaming/resumable downloader")

@@ -276,24 +276,26 @@ sequenceDiagram
 
 ### anti-bot-web-scraper — 自动多后端反爬数据流水线
 
-**核心能力：** 从普通 HTTP 请求开始，按目标封锁类型自动升级后端：TLS 指纹模拟、Cloudflare/WAF/Turnstile 挑战处理、stealth 浏览器循环，直到返回可用 HTML 或 API JSON；同时覆盖代理池、登录会话、媒体/HLS 深爬、API 发现、数据处理、指标与守护进程运行。
+**核心能力：** 从普通 HTTP 请求开始，按目标封锁类型自动升级后端：TLS 指纹模拟、Cloudflare/WAF/Turnstile 挑战处理、stealth 浏览器循环，直到返回可用 HTML 或 API JSON；默认 `auto` 模式在无验证码 API Key 时仍可运行，浏览器自动点击非交互挑战并自动发现/安装本地 OCR。同时覆盖代理池、登录会话、媒体/HLS/DASH/Smooth 深爬、容器元数据与字幕解析、CSS/JS/字体/数据资源爬取、API 发现与参数自动识别、WebSocket/SSE 与 DOM/JS 事件捕获、数据处理、指标与守护进程运行。
 
 功能清单：
 
 | 功能 | 说明 |
 |------|------|
-| 自适应 HTTP 后端 | `smart_fetch.py` 在 curl_cffi / cloudscraper / httpx / 标准库之间自动切换 |
+| 自适应 HTTP 后端 | `smart_fetch.py` 在 curl_cffi / cloudscraper / httpx / 标准库之间自动切换，缺失依赖首次使用时按需安装 |
 | 完整采集流水线 | `web_data_pipeline.py` 用一份 JSON 配置完成采集、处理与输出 |
-| Cloudflare 深处理 | `cloudflare_challenge.py` / `turnstile_solver.py` / `challenge_cookie_bank.py` 处理 Managed Challenge、Turnstile 与 cf_clearance |
-| 浏览器级升级 | `stealth_browser.py` / `flaresolverr.py` 提供 Patchright / nodriver / DrissionPage / FlareSolverr 深层处理 |
-| WAF 与验证码 | `waf_vendor.py` 分类厂商 WAF；验证码队列、滑块与音频处理 |
+| Cloudflare 深处理 | `cloudflare_challenge.py` / `turnstile_solver.py` / `challenge_cookie_bank.py` 处理 Managed Challenge、Turnstile 与 cf_clearance；无 Key 时浏览器自动点击非交互挑战 |
+| 浏览器级升级 | `stealth_browser.py` / `flaresolverr.py` / `browser_session.py` 提供 Patchright / nodriver / DrissionPage / FlareSolverr 与独立浏览器容器 |
+| WAF 与验证码 | `waf_vendor.py` 分类厂商 WAF；验证码队列、滑块与音频处理；本地 OCR 自动发现并安装 ddddocr / rapidocr / easyocr / paddleocr / cnocr / pytesseract |
 | 生产级采集 | 代理池、多账号登录、限速重试、任务守护进程、运行摘要 |
-| 媒体深爬 | 图片/视频/音频与 HLS 流获取，支持断点续爬 |
-| API 发现与处理 | 页面/API 分析、API 客户端分页、声明式数据清洗与 JSON/JSONL/CSV 输出 |
-| 验收与依赖 | `acceptance_suite.py` 真实站点验收基线；`ensure_web_fetch_dependencies.py` 一键检测/安装可选依赖 |
+| 媒体与资源深爬 | 图片/视频/音频与 HLS/DASH/Smooth 流获取，支持断点续爬；解析容器元数据与 WebVTT/SRT/ASS 字幕，爬取 CSS/JS/字体/数据资源 |
+| 全站与多站爬取 | 单 URL 自动生成全站任务并深爬子页/API；`multi_site_pipeline.py` 并行隔离执行多站，含风险感知限速、站点级重试与阻断恢复/后端轮换 |
+| API 发现与处理 | 页面/API 分析（JS body、GraphQL、WebSocket/SSE）、API 客户端分页、头部指纹、子页参数自动增强、全站 API 索引、响应驱动参数链、声明式数据清洗与 JSON/JSONL/CSV 输出 |
+| 实时事件捕获 | WebSocket/SSE 帧与事件捕获，DOM/JS 事件发现，浏览器事件触发与 storage 参数提取 |
+| 验收与依赖 | `acceptance_suite.py` 真实站点验收基线；`ensure_web_fetch_dependencies.py` 一键检测/安装 HTTP/OCR/浏览器可选依赖，`auto` 模式首次使用自动补齐 |
 | 合规边界 | 采集前确认授权，遵守 robots 与平台条款，凭据本地加密，默认限速并记录失败 |
 
-**依赖：** Python 3.8+；`smart_fetch.py` 可选 curl_cffi / cloudscraper / httpx，浏览器级能力可选 Patchright / nodriver / DrissionPage / FlareSolverr，可通过 `ensure_web_fetch_dependencies.py` 自动检测安装。
+**依赖：** Python 3.8+；`smart_fetch.py` 可选 curl_cffi / cloudscraper / httpx，浏览器级能力可选 Patchright / nodriver / DrissionPage / FlareSolverr，验证码 OCR 可选 ddddocr / rapidocr_onnxruntime / easyocr / paddleocr / cnocr / pytesseract，可通过 `ensure_web_fetch_dependencies.py` 自动检测安装；`auto` 模式首次使用时按需补齐缺失依赖。
 
 完整命令参考：[anti-bot-web-scraper](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/anti-bot-web-scraper/SKILL.md)
 

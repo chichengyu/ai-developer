@@ -33,7 +33,13 @@ from fingerprint_binding import (
     resolve_binding,
 )
 from metrics import MetricsRegistry
-from proxy_pool import ProxyPool, create_proxy_pool, normalize_proxy
+from proxy_pool import (
+    CURRENT_IP_PROXY,
+    ProxyPool,
+    create_proxy_pool,
+    is_current_ip_proxy,
+    normalize_proxy,
+)
 from security_detector import SecurityReport, detect_security_mechanisms
 from smart_fetch import create_fetch_session
 from stealth_browser import (
@@ -214,10 +220,22 @@ def run_bypass(
     """Run the adaptive bypass loop and return a structured result."""
     started = time.monotonic()
     cfg = dict(config or {})
-    binding = resolve_binding(
+    initial_binding = resolve_binding(
         cfg.get("fingerprint_binding")
         or (cfg.get("fetch") or {}).get("fingerprint_binding")
     )
+    rotation = cfg.get("fingerprint_rotation")
+    if rotation:
+        bindings = [
+            resolved
+            for resolved in (resolve_binding(item) for item in rotation)
+            if resolved is not None
+        ]
+    elif initial_binding is not None:
+        bindings = [initial_binding]
+    else:
+        bindings = [resolve_binding("chrome124"), resolve_binding("edge124")]
+    binding = bindings[0]
     pool = create_proxy_pool(cfg.get("proxy_pool"))
     pool_cfg = cfg.get("proxy_pool") or {}
     proxy_region = (
@@ -239,10 +257,16 @@ def run_bypass(
     )
     metrics = MetricsRegistry()
     explicit_proxy = cfg.get("proxy")
-    proxy = normalize_proxy(explicit_proxy or (pool.get_proxy() if pool is not None else None))
+    raw_proxy = explicit_proxy or (pool.get_proxy() if pool is not None else None)
+    proxy = normalize_proxy(raw_proxy)
+    proxy_label = proxy or (
+        CURRENT_IP_PROXY
+        if raw_proxy is None or is_current_ip_proxy(raw_proxy)
+        else None
+    )
     browser_pool = None if explicit_proxy else pool
     captcha_solver = cfg.get("captcha_solver")
-    result = BypassResult(proxy=proxy, reused_cookies=len(bank_cookies))
+    result = BypassResult(proxy=proxy_label, reused_cookies=len(bank_cookies))
     metrics.inc("task_total")
     if pool is not None:
         metrics.set("proxy_available", len(pool.healthy_proxies()))
@@ -413,7 +437,22 @@ def run_bypass(
         )
     rounds = max(1, int(max_rounds))
     last_error: str | None = None
+    carry_cookies = list(bank_cookies)
     for round_no in range(rounds):
+        binding = bindings[round_no % len(bindings)]
+        engine_order = choose_engine_order(
+            binding,
+            stage,
+            configured_order=browser_config.get("stealth_engine_order")
+            or browser_config.get("engine_order"),
+        )
+        if vendor.detected and vendor.vendor != "cloudflare":
+            vendor_engines = recommended_engine_order(
+                vendor.vendor,
+                available_stealth_engines(),
+            )
+            if vendor_engines:
+                engine_order = vendor_engines
         if progress is not None:
             progress(
                 "browser",
@@ -436,7 +475,7 @@ def run_bypass(
                     browser_config.get("timeout_ms", timeout * 1000),
                 )
             ),
-            auto_install=bool(browser_config.get("auto_install", False)),
+            auto_install=bool(browser_config.get("auto_install", True)),
             max_attempts=int(browser_config.get("max_attempts", 2)),
             retry_delay=float(browser_config.get("retry_delay", 2.0)),
             rotate_proxy_on_fail=bool(
@@ -445,15 +484,20 @@ def run_bypass(
             fingerprint_binding=binding,
             captcha_solver=captcha_solver,
             progress=progress,
+            max_engines_per_round=int(
+                browser_config.get("max_engines_per_round", 3)
+            ),
+            initial_cookies=carry_cookies or None,
         )
         result.attempts.extend(browser_result.attempts or [])
         result.engine = browser_result.engine
-        result.proxy = browser_result.proxy or proxy
+        result.proxy = browser_result.proxy or proxy_label
         result.cookies = browser_result.cookies or []
         result.cf_clearance = any(
             str(item.get("name", "")).lower() == "cf_clearance"
             for item in result.cookies
         )
+        carry_cookies = list(result.cookies or carry_cookies)
         last_error = browser_result.error
 
         if progress is not None:

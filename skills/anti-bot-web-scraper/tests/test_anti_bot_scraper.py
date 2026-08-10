@@ -335,6 +335,7 @@ def test_bypass_engine_http_pass() -> None:
         result = run_bypass(f"{base}/", {"fetch": {"backend": "standard"}})
         assert result.passed is True
         assert result.strategy == "http"
+        assert result.proxy == "current_ip"
         assert "bypass-ok" in result.body
     finally:
         server.shutdown()
@@ -873,6 +874,14 @@ def test_hls_client_resolve_and_download_local() -> None:
             assert result.downloaded_segments == 2
             assert result.combined_path is not None
             assert Path(result.combined_path).read_bytes() == b"segment-onesegment-two"
+            resumed = client.download(
+                f"{base}/master.m3u8",
+                Path(tmp),
+                preferred_height=720,
+                include_segments=True,
+                combine=True,
+            )
+            assert resumed.resumed_segments == resumed.downloaded_segments == 2
     finally:
         server.shutdown()
 
@@ -931,6 +940,7 @@ def test_media_crawler_local_jsonl_and_downloads() -> None:
                 b'<html><body><a href="/a.html">A</a>'
                 b'<img src="/img.jpg"><video src="/v.mp4"></video>'
                 b'<audio src="/a.mp3"></audio><a href="/master.m3u8">HLS</a>'
+                b'<link rel="stylesheet" href="/app.css">'
                 b"</body></html>"
             ),
             "/a.html": b"<html><body>leaf</body></html>",
@@ -941,6 +951,8 @@ def test_media_crawler_local_jsonl_and_downloads() -> None:
             "/master.m3u8": master.encode("utf-8"),
             "/media.m3u8": media.encode("utf-8"),
             "/seg1.ts": b"hls-segment",
+            "/app.css": b'body{background:url("/nested.png")}',
+            "/nested.png": b"nested-image",
         }
     )
     try:
@@ -971,6 +983,7 @@ def test_media_crawler_local_jsonl_and_downloads() -> None:
             assert any(url.endswith("/a.html") for url in urls)
             assert result.summary()["media_discovered"] >= 4
             assert result.summary()["media_downloaded"] >= 4
+            assert result.summary()["media_downloaded"] >= 6
             media_root = root / "media"
             assert (media_root / "image").exists()
             assert (media_root / "video").exists()
@@ -1049,6 +1062,8 @@ def test_autonomous_crawler_local_async() -> None:
         {"items":[{"id":1,"title":"A"},{"id":2,"title":"B"}]}
       </script>
       <img src="/img.jpg">
+      <link rel="stylesheet" href="/app.css">
+      <script>new EventSource("/events");</script>
     </body></html>
     """
     base, server = _start_server(
@@ -1056,6 +1071,7 @@ def test_autonomous_crawler_local_async() -> None:
             "/index.html": index.encode("utf-8"),
             "/a.html": b"<html><body>leaf</body></html>",
             "/img.jpg": b"image",
+            "/app.css": b"body{}",
         }
     )
     try:
@@ -1083,6 +1099,8 @@ def test_autonomous_crawler_local_async() -> None:
             assert summary["stats"]["seen"] >= 2
             assert summary["stats"]["records"] >= 2
             assert summary["stats"]["media"] >= 1
+            assert summary["stats"]["assets"] >= 1
+            assert summary["stats"]["streams"] >= 1
             jsonl = (root / "crawl.jsonl").read_text(encoding="utf-8")
             assert '"kind": "record"' in jsonl
     finally:
@@ -1411,18 +1429,32 @@ def test_fingerprint_bank_and_header_profiles() -> None:
 def test_fingerprint_binding_full_chain() -> None:
     chrome = resolve_binding("chrome126")
     assert chrome is not None
-    assert chrome.validate() == []
     assert chrome.tls_impersonate == "chrome_124"
     assert "Chrome/126" in chrome.user_agent
+    issues = chrome.validate()
+    assert any("TLS impersonation version" in issue for issue in issues)
     headers = chrome.to_header_headers()
     assert headers["User-Agent"] == chrome.user_agent
     assert "Sec-CH-UA" in headers
+
+    chrome124 = resolve_binding("chrome124")
+    assert chrome124 is not None
+    assert chrome124.validate() == []
+    assert resolve_binding("chrome").name == "chrome124"
+    chrome120 = resolve_binding("chrome120")
+    assert chrome120 is not None
+    assert chrome120.validate() == []
+    edge124 = resolve_binding("edge124")
+    assert edge124 is not None
+    assert edge124.validate() == []
+    assert resolve_binding("edge").name == "edge124"
 
     firefox = resolve_binding("firefox127")
     assert firefox is not None
     assert "Firefox/127" in firefox.user_agent
     assert "firefox" in firefox.tls_impersonate
     assert firefox.compatible_engines
+    assert any("TLS impersonation version" in issue for issue in firefox.validate())
 
     cfg = apply_binding_to_fetch_config({"browser": {"engine": "auto"}}, chrome)
     assert cfg["impersonate"] == "chrome_124"
