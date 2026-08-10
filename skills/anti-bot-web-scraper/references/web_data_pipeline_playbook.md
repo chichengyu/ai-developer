@@ -577,7 +577,7 @@ worker:
   text exposition, and `AlertManager` rules for failure rate, proxy
   depletion, and new challenge variants.
 - `daemon.py`: PID file, heartbeat, crash restart, timeout, and clean
-  SIGINT/SIGTERM shutdown for crawler commands.
+  SIGINT/SIGTERM (Unix) or SIGBREAK (Windows) shutdown for crawler commands.
 
 Example daemon invocation:
 
