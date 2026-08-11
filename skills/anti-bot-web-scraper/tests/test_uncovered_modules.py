@@ -302,6 +302,7 @@ def test_web_data_pipeline_helpers_and_local_run() -> None:
                 json.dumps(
                     {
                         "pages": [f"{base}/list"],
+                        "reverse_output": str(Path(tmp) / "reverse.json"),
                         "api": {
                             "min_interval": 0.0,
                             "max_retries": 0,

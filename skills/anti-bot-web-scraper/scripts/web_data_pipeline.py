@@ -21,6 +21,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable
 from contextlib import suppress
@@ -28,8 +29,14 @@ from pathlib import Path
 from typing import Any
 
 from alternate_access import try_alternate_access
-from api_client import ApiClient, ApiSpec, build_api_specs
-from browser_session import BrowserSession, FingerprintOptions, NetworkCaptureOptions, PageCapture
+from api_client import ApiClient, ApiFetchResult, ApiSpec, build_api_specs
+from browser_session import (
+    BrowserSession,
+    FingerprintOptions,
+    NetworkCaptureOptions,
+    NetworkEntry,
+    PageCapture,
+)
 from captcha_solver import (
     AutoCaptchaSolver,
     CaptchaSolver,
@@ -202,6 +209,14 @@ class WebDataPipeline:
         self.stream_specs: list[ApiSpec] = []
         self.chain_rounds = 0
         self.chain_new_specs = 0
+        self.reverse_reports: list[dict[str, Any]] = []
+        self.reverse_lab_report: dict[str, Any] | None = None
+        self.replay_specs: list[ApiSpec] = []
+        self.reverse_summary: dict[str, Any] = {}
+        self.reverse_output: Path | None = None
+        self.reverse_retry_summary: dict[str, Any] = {}
+        self.adaptive_stealth_switched = False
+        self._active_diff_session: Any = None
 
     def _fingerprint(self) -> FingerprintOptions:
         fingerprint_cfg = self.browser_config.get("fingerprint") or {}
@@ -232,6 +247,53 @@ class WebDataPipeline:
             or binding_from_fetch_config(self.browser_config)
         )
 
+    def _function_probe_patterns(self) -> list[str]:
+        reverse = self.config.get("reverse") or {}
+        patterns = reverse.get("function_probe_patterns") or self.browser_config.get(
+            "function_probe_patterns"
+        )
+        if isinstance(patterns, str):
+            return [item.strip() for item in patterns.split(",") if item.strip()]
+        return [str(item) for item in (patterns or []) if str(item).strip()]
+
+    def _reverse_hook_mode(self) -> str:
+        """Return always/adaptive/disabled based on reverse and stealth config."""
+        reverse = self.config.get("reverse") or {}
+        hook = reverse.get("hook")
+        if hook is None:
+            hook = self.browser_config.get("deep_hook", "auto")
+        stealth = str(reverse.get("stealth", "auto") or "auto").lower()
+        if stealth == "ultimate":
+            return "disabled"
+        if hook is True or str(hook).lower() in {"always", "normal"}:
+            return "always"
+        if hook is False or str(hook).lower() in {"off", "disabled"}:
+            return "disabled"
+        return "adaptive"
+
+    def _reverse_hook_enabled(self) -> bool:
+        """Whether reverse hooking is allowed at all in the current mode."""
+        return self._reverse_hook_mode() != "disabled"
+
+    @staticmethod
+    def _security_has_risk(security: dict[str, Any] | None) -> bool:
+        """Return True when one capture should skip adaptive hook injection."""
+        return bool(
+            security
+            and (
+                security.get("blocked")
+                or security.get("primary_kind")
+                or security.get("auto_captcha")
+                or security.get("findings")
+            )
+        )
+
+    def _adaptive_hook_allowed(self, security: dict[str, Any] | None) -> bool:
+        """Only install the hook on a confirmed clean page."""
+        if self._reverse_hook_mode() not in {"always", "adaptive"}:
+            return False
+        return not self._security_has_risk(security)
+
     def _open_browser(self) -> BrowserSession:
         proxy = self.browser_config.get("proxy")
         if not proxy and self.proxy_pool is not None:
@@ -250,6 +312,16 @@ class WebDataPipeline:
             fingerprint_binding=self._binding(),
             cloudflare_config=self.cloudflare_config,
             captcha_solver=self._cloudflare_captcha_solver(),
+            deep_hook=self._reverse_hook_mode() == "always",
+            function_probe_patterns=self._function_probe_patterns(),
+            wasm_hook=bool(
+                (self.config.get("reverse") or {}).get("wasm_hook")
+                or self.browser_config.get("wasm_hook")
+            ),
+            native_probe=bool(
+                (self.config.get("reverse") or {}).get("native_probe")
+                or self.browser_config.get("native_probe")
+            ),
         )
         session.start()
         cookies_path = self.browser_config.get("cookies_path")
@@ -304,6 +376,24 @@ class WebDataPipeline:
             return solver
         return self.captcha_solver if hasattr(self.captcha_solver, "solve_turnstile") else None
 
+    def _detect_capture_security(
+        self,
+        url: str,
+        html: str,
+        headers: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if not self.security_config.get("enabled", True):
+            return None
+        report = detect_security_mechanisms(
+            200,
+            url,
+            headers or {},
+            html,
+            html=html,
+            page_url=url,
+        )
+        return report.to_dict()
+
     def _capture_browser_page(self, session: BrowserSession, url: str) -> PageCapture:
         capture_cfg = self.browser_config.get("network_capture") or {}
         options = NetworkCaptureOptions(
@@ -355,37 +445,71 @@ class WebDataPipeline:
                 )
             if self.browser_config.get("trigger_events"):
                 session.trigger_page_events(
-                    event_names=tuple(
-                        self.browser_config.get("trigger_events") or ("click",)
-                    ),
+                    event_names=tuple(self.browser_config.get("trigger_events") or ("click",)),
                     max_actions=int(self.browser_config.get("max_event_actions", 20)),
                 )
                 with suppress(Exception):
                     session.page.wait_for_load_state(
                         "networkidle",
-                        timeout=float(
-                            self.browser_config.get("event_network_timeout", 5000)
-                        ),
+                        timeout=float(self.browser_config.get("event_network_timeout", 5000)),
                     )
+            html = session.page.content()
+            security = self._detect_capture_security(url, html)
+            hook_mode = self._reverse_hook_mode()
+            if hook_mode == "adaptive" and self._security_has_risk(security):
+                self.adaptive_stealth_switched = True
+            if not session.deep_hook and self._adaptive_hook_allowed(security):
+                with suppress(Exception):
+                    session._install_deep_hook()
+                    session.stop_capture()
+                    session.start_capture(options)
+                    session.page.reload(
+                        wait_until="domcontentloaded",
+                        timeout=float(self.browser_config.get("goto_timeout", 30000)),
+                    )
+                    if self.browser_config.get("network_idle", True):
+                        session.page.wait_for_load_state(
+                            "networkidle",
+                            timeout=float(
+                                self.browser_config.get(
+                                    "network_idle_timeout",
+                                    15000,
+                                )
+                            ),
+                        )
+                    if self.browser_config.get("trigger_events"):
+                        session.trigger_page_events(
+                            event_names=tuple(
+                                self.browser_config.get("trigger_events") or ("click",)
+                            ),
+                            max_actions=int(self.browser_config.get("max_event_actions", 20)),
+                        )
+                        with suppress(Exception):
+                            session.page.wait_for_load_state(
+                                "networkidle",
+                                timeout=float(
+                                    self.browser_config.get(
+                                        "event_network_timeout",
+                                        5000,
+                                    )
+                                ),
+                            )
+                    html = session.page.content()
+                    security = self._detect_capture_security(url, html)
             storage = (
                 session.capture_storage()
                 if self.browser_config.get("capture_storage", False)
                 else None
             )
+            hook = session.capture_deep_hook()
+            function_probes = session.capture_function_probes()
+            wasm_calls = session.capture_wasm_calls()
+            native_probes = session.capture_native_probes()
             html = session.page.content()
         finally:
             network = session.stop_capture()
-        security = None
-        if self.security_config.get("enabled", True):
-            report = detect_security_mechanisms(
-                200,
-                url,
-                {},
-                html,
-                html=html,
-                page_url=url,
-            )
-            security = report.to_dict()
+        if self.security_config.get("enabled", True) and security is None:
+            security = self._detect_capture_security(url, html)
         return PageCapture(
             url=url,
             html=html,
@@ -393,6 +517,10 @@ class WebDataPipeline:
             analysis=analyze_page(html, base_url=url),
             security=security,
             storage=storage,
+            hook=hook,
+            function_probes=function_probes,
+            wasm_calls=wasm_calls,
+            native_probes=native_probes,
         )
 
     def _capture_http_page(self, url: str) -> PageCapture:
@@ -434,9 +562,7 @@ class WebDataPipeline:
                 challenges = detect_captchas(html, page_url=url)
                 if challenges:
                     security["auto_captcha"] = True
-                    security["captcha_kinds"] = sorted(
-                        {challenge.kind for challenge in challenges}
-                    )
+                    security["captcha_kinds"] = sorted({challenge.kind for challenge in challenges})
             except Exception:
                 pass
         return PageCapture(
@@ -458,9 +584,7 @@ class WebDataPipeline:
     def _deep_crawl(self) -> Any:
         crawl = self.crawl_config
         seeds = [str(item) for item in crawl.get("seeds") or self.pages]
-        fetch_config = (
-            self._fetch_config_for_url(seeds[0]) if seeds else self.fetch_config
-        )
+        fetch_config = self._fetch_config_for_url(seeds[0]) if seeds else self.fetch_config
         browser_mode = bool(self.browser_config.get("enabled", False))
         proxy = self.api_config.get("proxy") or self.browser_config.get("proxy")
         if not proxy and self.proxy_pool is not None:
@@ -608,10 +732,7 @@ class WebDataPipeline:
             index
             for index, capture in enumerate(self.captures)
             if capture.security
-            and (
-                capture.security.get("blocked")
-                or capture.security.get("auto_captcha")
-            )
+            and (capture.security.get("blocked") or capture.security.get("auto_captcha"))
         ]
         if not blocked:
             return
@@ -665,9 +786,7 @@ class WebDataPipeline:
                         {"alternate": alt_config if isinstance(alt_config, dict) else {}},
                         proxy=proxy,
                         timeout=float(
-                            (alt_config if isinstance(alt_config, dict) else {}).get(
-                                "timeout", 3.0
-                            )
+                            (alt_config if isinstance(alt_config, dict) else {}).get("timeout", 3.0)
                         ),
                         max_variants=int(
                             (alt_config if isinstance(alt_config, dict) else {}).get(
@@ -707,9 +826,7 @@ class WebDataPipeline:
                     proxy=proxy,
                     browser_path=self.browser_config.get("browser_path"),
                     headless=bool(self.browser_config.get("headless", True)),
-                    headless_fallback=bool(
-                        self.browser_config.get("headless_fallback", True)
-                    ),
+                    headless_fallback=bool(self.browser_config.get("headless_fallback", True)),
                     storage_state=self.browser_config.get("storage_state"),
                     timeout_ms=float(self.browser_config.get("challenge_timeout", 60000)),
                     auto_install=bool(self.browser_config.get("auto_install", True)),
@@ -724,9 +841,7 @@ class WebDataPipeline:
                         self.browser_config.get("rotate_proxy_on_fail", True)
                     ),
                     proxy_pool=self.proxy_pool,
-                    max_engines_per_round=int(
-                        self.browser_config.get("max_engines_per_round", 3)
-                    ),
+                    max_engines_per_round=int(self.browser_config.get("max_engines_per_round", 3)),
                     initial_cookies=(self._api_cookies or self._browser_cookies) or None,
                 )
             except Exception:
@@ -1006,9 +1121,15 @@ class WebDataPipeline:
                 self.captures,
                 augment_config,
             )
-        self.stream_specs = [
-            spec for spec in self.specs if self._is_stream_spec(spec)
-        ]
+        replay_cfg = (self.config.get("reverse") or {}).get("replay", True)
+        if replay_cfg and self.replay_specs:
+            existing_keys = {(spec.method, spec.url) for spec in self.specs}
+            for spec in self.replay_specs:
+                key = (spec.method, spec.url)
+                if key not in existing_keys:
+                    existing_keys.add(key)
+                    self.specs.append(spec)
+        self.stream_specs = [spec for spec in self.specs if self._is_stream_spec(spec)]
         return self.specs
 
     def _new_api_client(self) -> ApiClient:
@@ -1023,7 +1144,9 @@ class WebDataPipeline:
                 cookies.append(self._cloudflare_result.clearance_cookie)
                 proxy = self._cloudflare_result.proxy or proxy
                 proxy_pool = None
-        fetch_cfg = self._fetch_config_for_url(self.specs[0].url) if self.specs else self.fetch_config
+        fetch_cfg = (
+            self._fetch_config_for_url(self.specs[0].url) if self.specs else self.fetch_config
+        )
         client = ApiClient(
             headers=headers,
             proxy=proxy,
@@ -1036,9 +1159,7 @@ class WebDataPipeline:
             block_retries=int(self.api_config.get("block_retries", 2)),
             block_retry_delay=float(self.api_config.get("block_retry_delay", 2.0)),
             block_retry_backoff=float(self.api_config.get("block_retry_backoff", 2.0)),
-            rotate_proxy_on_block=bool(
-                self.api_config.get("rotate_proxy_on_block", True)
-            ),
+            rotate_proxy_on_block=bool(self.api_config.get("rotate_proxy_on_block", True)),
             cookies=cookies,
             backend=fetch_cfg.get(
                 "backend",
@@ -1047,9 +1168,7 @@ class WebDataPipeline:
             auto_install=fetch_cfg.get("auto_install"),
             browser_config=fetch_cfg.get("browser") or self.browser_config,
             header_fingerprint=fetch_cfg.get("header_fingerprint", "chrome"),
-            fingerprint_binding=(
-                binding_from_fetch_config(fetch_cfg) or self._binding()
-            ),
+            fingerprint_binding=(binding_from_fetch_config(fetch_cfg) or self._binding()),
         )
         return client
 
@@ -1126,6 +1245,444 @@ class WebDataPipeline:
             records.extend(_unwrap_data(result.data))
         return records
 
+    @staticmethod
+    def _reverse_capture_dict(capture: PageCapture) -> dict[str, Any]:
+        data = capture.to_dict(include_html=True)
+        data["hook"] = capture.hook or {}
+        data["storage"] = capture.storage
+        data["function_probes"] = capture.function_probes or {}
+        data["wasm_calls"] = capture.wasm_calls or {}
+        data["native_probes"] = capture.native_probes or {}
+        return data
+
+    def _active_diff_sender(self) -> Callable[..., Any]:
+        """Build a bounded HTTP sender used by active differential verification."""
+        proxy = self.api_config.get("proxy") or self.browser_config.get("proxy")
+        if not proxy and self.proxy_pool is not None:
+            proxy = self.proxy_pool.get_proxy()
+        session = create_fetch_session(
+            self._fetch_config_for_url(""),
+            headers=self.api_config.get("headers"),
+            proxy=proxy,
+            proxy_pool=self.proxy_pool,
+            min_interval=float(self.api_config.get("min_interval", 0.0)),
+            max_retries=int(self.api_config.get("max_retries", 0)),
+            backoff_base=float(self.api_config.get("backoff_base", 0.5)),
+            backoff_max=float(self.api_config.get("backoff_max", 30.0)),
+        )
+        self._active_diff_session = session
+
+        def sender(
+            method: str,
+            url: str,
+            headers: dict[str, str] | None = None,
+            data: Any = None,
+            body: Any = None,
+        ) -> tuple[int, str, dict[str, str]]:
+            try:
+                result, status, response_headers = session.request_json_with_meta(
+                    method,
+                    url,
+                    headers=headers,
+                    data=data,
+                    json_body=body,
+                    timeout=float(self.api_config.get("timeout", 30.0)),
+                )
+                text = json.dumps(result, ensure_ascii=False) if result is not None else ""
+                return int(status or 0), text, response_headers
+            except Exception as exc:
+                return 0, str(exc), {}
+
+        return sender
+
+    def _run_reverse_chain(self) -> dict[str, Any]:
+        """Mandatory deep reverse stage: hook data, per-page analysis, cross-capture lab."""
+        from deep_reverse import analyze_capture
+        from reverse_lab import analyze_capture_set
+
+        hook_mode = self._reverse_hook_mode()
+        hook_enabled = hook_mode != "disabled"
+        reverse_config = self.config.get("reverse") or {}
+        deep_deobfuscation = str(reverse_config.get("deep_deobfuscation", "auto") or "auto")
+        run_bundle = str(reverse_config.get("run_bundle", "auto") or "auto")
+        auto_install = bool(
+            reverse_config.get("auto_install", self.mode == "auto")
+        )
+        captures = [self._reverse_capture_dict(capture) for capture in self.captures]
+        reports: list[dict[str, Any]] = []
+        for capture in captures:
+            report = analyze_capture(
+                capture,
+                deep_deobfuscation=deep_deobfuscation,
+                auto_install=auto_install,
+                run_bundle=run_bundle,
+            )
+            report_dict = report.to_dict()
+            reports.append(report_dict)
+            capture["analysis"] = report_dict["analysis"]
+
+        active_diff_config = reverse_config.get("active_diff")
+        active_sender = None
+        self._active_diff_session = None
+        if active_diff_config is True or (
+            isinstance(active_diff_config, dict) and active_diff_config.get("enabled")
+        ):
+            active_sender = self._active_diff_sender()
+        try:
+            lab_dict = analyze_capture_set(
+                captures,
+                active_diff=active_diff_config,
+                active_diff_sender=active_sender,
+                knowledge_store=reverse_config.get("knowledge_store"),
+            ).to_dict()
+        finally:
+            if self._active_diff_session is not None:
+                with suppress(Exception):
+                    self._active_diff_session.close()
+                self._active_diff_session = None
+        lab_summary = dict(lab_dict.get("summary") or {})
+        replay_specs: list[ApiSpec] = []
+        try:
+            from replay_client import build_replay_specs
+
+            replay_specs = build_replay_specs(lab_dict, captures)
+        except Exception:
+            replay_specs = []
+        self.replay_specs = replay_specs
+
+        def count(key: str) -> int:
+            return sum(int(item.get("summary", {}).get(key, 0) or 0) for item in reports)
+
+        scores = [
+            int((item.get("analysis") or {}).get("obfuscation", {}).get("score", 0) or 0)
+            for item in reports
+        ]
+        summary = {
+            "pages": len(reports),
+            "hook_enabled": hook_enabled,
+            "hook_mode": hook_mode,
+            "adaptive_stealth_switched": self.adaptive_stealth_switched,
+            "risky_captures": sum(
+                1
+                for capture in captures
+                if self._security_has_risk(capture.get("security"))
+            ),
+            "stealth_mode": "ultimate" if hook_mode == "disabled" else hook_mode,
+            "scripts": count("scripts"),
+            "inline_scripts": count("inline_scripts"),
+            "crypto_calls": count("crypto_calls"),
+            "request_sites": count("request_sites"),
+            "signature_candidates": count("signature_candidates"),
+            "signature_recipes": count("signature_recipes"),
+            "data_flow_links": count("data_flow_links"),
+            "ast_data_flow_links": count("ast_data_flow_links"),
+            "captured_requests": count("captured_requests"),
+            "hook_requests": count("hook_requests"),
+            "function_calls": count("function_calls"),
+            "wasm_calls": count("wasm_calls"),
+            "native_calls": count("native_calls"),
+            "device_fields": count("device_fields"),
+            "timestamp_fields": count("timestamp_fields"),
+            "bundle_cross_refs": count("bundle_cross_refs"),
+            "obfuscation_score": max(scores) if scores else 0,
+            "node_available": any(bool(item.get("node_available")) for item in reports),
+            "reverse_lab": lab_summary,
+            "replay_specs": len(replay_specs),
+        }
+        reverse_output = Path(self.config.get("reverse_output", "reverse_report.json"))
+        reverse_output.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "mode": "mandatory",
+            "generated_at": time.time(),
+            "hook_enabled": hook_enabled,
+            "summary": summary,
+            "per_page": reports,
+            "reverse_lab": lab_dict,
+        }
+        reverse_output.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        self.reverse_reports = reports
+        self.reverse_lab_report = lab_dict
+        self.reverse_summary = summary
+        self.reverse_output = reverse_output
+        return summary
+
+    def _reverse_retry_blocked(self) -> dict[str, Any]:
+        """Retry blocked captures with fresh requests built from reverse analysis."""
+        from reverse_lab import build_reverse_retry_requests
+
+        blocked = [
+            index
+            for index, capture in enumerate(self.captures)
+            if capture.security and capture.security.get("blocked")
+        ]
+        summary = {
+            "blocked": len(blocked),
+            "attempted": 0,
+            "succeeded": 0,
+            "requests": 0,
+            "errors": 0,
+        }
+        self.reverse_retry_summary = summary
+        reverse_config = self.config.get("reverse") or {}
+        if not reverse_config.get("retry_on_block", True):
+            return summary
+        max_requests = int(reverse_config.get("max_retry_requests", 8))
+        max_attempts = int(reverse_config.get("max_retry_attempts", 1))
+        if not blocked or max_requests <= 0 or max_attempts <= 0:
+            return summary
+
+        captures = [self._reverse_capture_dict(capture) for capture in self.captures]
+        for capture_dict, report in zip(captures, self.reverse_reports, strict=False):
+            capture_dict["analysis"] = report.get("analysis")
+        candidates = build_reverse_retry_requests(
+            captures,
+            max_requests=max_requests,
+            brute_force=bool(reverse_config.get("brute_force", True)),
+            brute_max_length=int(reverse_config.get("brute_max_length", 2)),
+        )
+        summary["requests"] = len(candidates)
+        if not candidates:
+            return summary
+
+        proxy = self.api_config.get("proxy") or self.browser_config.get("proxy")
+        if not proxy and self.proxy_pool is not None:
+            proxy = self.proxy_pool.get_proxy()
+        session = create_fetch_session(
+            self._fetch_config_for_url(str(candidates[0].get("url") or "")),
+            headers=self.api_config.get("headers"),
+            proxy=proxy,
+            proxy_pool=self.proxy_pool,
+            captcha_solver=self._cloudflare_captcha_solver(),
+            min_interval=float(self.api_config.get("min_interval", 0.0)),
+            max_retries=int(self.api_config.get("max_retries", 0)),
+            backoff_base=float(self.api_config.get("backoff_base", 0.5)),
+            backoff_max=float(self.api_config.get("backoff_max", 30.0)),
+        )
+        if self._api_cookies or self._browser_cookies:
+            session.load_cookies(list(self._api_cookies) + list(self._browser_cookies))
+        recovered_urls: set[str] = set()
+        try:
+            for _attempt in range(max_attempts):
+                for candidate in candidates:
+                    source_url = str(candidate.get("source_url") or "")
+                    if source_url in recovered_urls:
+                        continue
+                    method = str(candidate.get("method") or "GET").upper()
+                    url = str(candidate.get("url") or "")
+                    if not url or url in recovered_urls:
+                        continue
+                    try:
+                        body, status, response_headers = session.request_json_with_meta(
+                            method,
+                            url,
+                            headers=dict(candidate.get("headers") or {}),
+                            json_body=candidate.get("json_body"),
+                            data=candidate.get("data"),
+                            timeout=float(self.api_config.get("timeout", 30.0)),
+                        )
+                    except Exception:
+                        summary["errors"] += 1
+                        continue
+                    summary["attempted"] += 1
+                    if status >= 400:
+                        continue
+                    html = (
+                        json.dumps(body, ensure_ascii=False)
+                        if isinstance(body, dict | list)
+                        else str(body or "")
+                    )
+                    security = None
+                    if self.security_config.get("enabled", True):
+                        report = detect_security_mechanisms(
+                            status,
+                            url,
+                            response_headers,
+                            html,
+                            html=html,
+                            page_url=url,
+                        )
+                        security = report.to_dict()
+                    if security and security.get("blocked"):
+                        continue
+                    content_type = str(response_headers.get("Content-Type") or "").lower()
+                    entry = NetworkEntry(
+                        method=method,
+                        url=url,
+                        resource_type="fetch",
+                        status=status,
+                        content_type=content_type,
+                        size=len(html.encode("utf-8")),
+                        json_data=body if isinstance(body, dict | list) else None,
+                        body_text=html,
+                        response_headers=response_headers,
+                        started_at=time.monotonic(),
+                        finished_at=time.monotonic(),
+                    )
+                    capture = PageCapture(
+                        url=url,
+                        html=html,
+                        network=[entry],
+                        analysis=analyze_page(html, base_url=url),
+                        security=security,
+                    )
+                    self.captures.append(capture)
+                    self._browser_captures[url] = capture
+                    recovered_urls.add(source_url)
+                    recovered_urls.add(url)
+                    summary["succeeded"] += 1
+        finally:
+            session.close()
+        self.reverse_retry_summary = summary
+        return summary
+
+    @staticmethod
+    def _same_api_url(a: str, b: str) -> bool:
+        left = urllib.parse.urlsplit(a)
+        right = urllib.parse.urlsplit(b)
+        return (left.scheme, left.netloc, left.path) == (
+            right.scheme,
+            right.netloc,
+            right.path,
+        )
+
+    def _reverse_retry_api_results(self, results: list[Any]) -> list[Any]:
+        """Retry blocked API fetches with fresh requests built from reverse analysis."""
+        from reverse_lab import build_reverse_retry_requests
+
+        failed = [
+            result
+            for result in results
+            if result.error or (result.security and result.security.get("blocked"))
+        ]
+        reverse_config = self.config.get("reverse") or {}
+        if not failed or not reverse_config.get("retry_on_block", True):
+            return results
+        max_requests = int(reverse_config.get("max_retry_requests", 8))
+        if max_requests <= 0:
+            return results
+
+        captures = [self._reverse_capture_dict(capture) for capture in self.captures]
+        for capture_dict, report in zip(captures, self.reverse_reports, strict=False):
+            capture_dict["analysis"] = report.get("analysis")
+        for result in failed:
+            spec = result.spec
+            captures.append(
+                {
+                    "url": spec.url,
+                    "network": [
+                        {
+                            "method": spec.method,
+                            "url": spec.url,
+                            "post_data": spec.body,
+                        }
+                    ],
+                    "analysis": {
+                        "request_sites": [
+                            {
+                                "method": spec.method,
+                                "url": spec.url,
+                                "params": spec.params,
+                                "body": spec.body,
+                            }
+                        ]
+                    },
+                    "hook": {},
+                }
+            )
+        candidates = build_reverse_retry_requests(
+            captures,
+            max_requests=max_requests,
+            brute_force=bool(reverse_config.get("brute_force", True)),
+            brute_max_length=int(reverse_config.get("brute_max_length", 2)),
+        )
+        if not candidates:
+            return results
+
+        proxy = self.api_config.get("proxy") or self.browser_config.get("proxy")
+        if not proxy and self.proxy_pool is not None:
+            proxy = self.proxy_pool.get_proxy()
+        session = create_fetch_session(
+            self._fetch_config_for_url(str(candidates[0].get("url") or "")),
+            headers=self.api_config.get("headers"),
+            proxy=proxy,
+            proxy_pool=self.proxy_pool,
+            captcha_solver=self._cloudflare_captcha_solver(),
+            min_interval=float(self.api_config.get("min_interval", 0.0)),
+            max_retries=int(self.api_config.get("max_retries", 0)),
+            backoff_base=float(self.api_config.get("backoff_base", 0.5)),
+            backoff_max=float(self.api_config.get("backoff_max", 30.0)),
+        )
+        if self._api_cookies or self._browser_cookies:
+            session.load_cookies(list(self._api_cookies) + list(self._browser_cookies))
+        replaced: dict[int, ApiFetchResult] = {}
+        attempted = 0
+        try:
+            for candidate in candidates:
+                url = str(candidate.get("url") or "")
+                failed_index = next(
+                    (
+                        index
+                        for index, result in enumerate(failed)
+                        if index not in replaced and self._same_api_url(url, result.spec.url)
+                    ),
+                    None,
+                )
+                if failed_index is None:
+                    continue
+                method = str(candidate.get("method") or "GET").upper()
+                try:
+                    body, status, response_headers = session.request_json_with_meta(
+                        method,
+                        url,
+                        headers=dict(candidate.get("headers") or {}),
+                        json_body=candidate.get("json_body"),
+                        data=candidate.get("data"),
+                        timeout=float(self.api_config.get("timeout", 30.0)),
+                    )
+                except Exception:
+                    continue
+                attempted += 1
+                if status >= 400:
+                    continue
+                html = (
+                    json.dumps(body, ensure_ascii=False)
+                    if isinstance(body, dict | list)
+                    else str(body or "")
+                )
+                security = None
+                if self.security_config.get("enabled", True):
+                    report = detect_security_mechanisms(
+                        status,
+                        url,
+                        response_headers,
+                        html,
+                        html=html,
+                        page_url=url,
+                    )
+                    security = report.to_dict()
+                if security and security.get("blocked"):
+                    continue
+                replaced[failed_index] = ApiFetchResult(
+                    spec=failed[failed_index].spec,
+                    data=body,
+                    error=None,
+                    status=status,
+                    headers=response_headers,
+                    security=security,
+                )
+        finally:
+            session.close()
+        if replaced:
+            summary = dict(self.reverse_retry_summary or {})
+            summary["api_blocked"] = len(failed)
+            summary["api_attempted"] = attempted
+            summary["api_succeeded"] = summary.get("api_succeeded", 0) + len(replaced)
+            self.reverse_retry_summary = summary
+        return [replaced.get(index, result) for index, result in enumerate(results)]
+
     def fetch_chained(self) -> list[dict[str, Any]]:
         """Fetch APIs in rounds, feeding response data back as new parameters."""
 
@@ -1139,9 +1696,7 @@ class WebDataPipeline:
         client = self._new_api_client()
         all_results: list[Any] = []
         seen_keys: set[tuple[str, str, str]] = set()
-        current_specs = [
-            spec for spec in self.specs if not self._is_stream_spec(spec)
-        ]
+        current_specs = [spec for spec in self.specs if not self._is_stream_spec(spec)]
         rounds = 0
         round_spec_counts: list[int] = []
         try:
@@ -1150,6 +1705,7 @@ class WebDataPipeline:
                     current_specs,
                     concurrency=concurrency,
                 )
+                results = self._reverse_retry_api_results(results)
                 all_results.extend(results)
                 round_spec_counts.append(len(current_specs))
                 for result in results:
@@ -1178,9 +1734,7 @@ class WebDataPipeline:
                         break
                 if not new_specs:
                     break
-                current_specs = [
-                    spec for spec in new_specs if not self._is_stream_spec(spec)
-                ]
+                current_specs = [spec for spec in new_specs if not self._is_stream_spec(spec)]
             self.chain_rounds = rounds
             self.chain_new_specs = max(0, sum(round_spec_counts[1:]))
             return self._results_to_records(all_results)
@@ -1193,12 +1747,11 @@ class WebDataPipeline:
             return self.fetch_chained()
         client = self._new_api_client()
         try:
-            fetchable = [
-                spec for spec in self.specs if not self._is_stream_spec(spec)
-            ]
+            fetchable = [spec for spec in self.specs if not self._is_stream_spec(spec)]
             results = client.fetch_all(
                 fetchable, concurrency=int(self.api_config.get("concurrency", 1))
             )
+            results = self._reverse_retry_api_results(results)
         finally:
             client.close()
         return self._results_to_records(results)
@@ -1213,6 +1766,13 @@ class WebDataPipeline:
 
         report("collect", 0.1, f"collecting {len(self.pages)} page(s)")
         self.collect()
+        report("reverse", 0.22, "running mandatory deep reverse analysis")
+        self._run_reverse_chain()
+        report("reverse-retry", 0.24, "retrying blocked captures with reversed signatures")
+        self._reverse_retry_blocked()
+        if self.reverse_retry_summary.get("succeeded"):
+            report("reverse", 0.26, "re-running reverse analysis after reverse retry")
+            self._run_reverse_chain()
         report("hls", 0.25, "processing detected HLS streams")
         self._download_hls_streams()
         report("assets", 0.3, "downloading discovered media assets")
@@ -1269,18 +1829,10 @@ class WebDataPipeline:
                 self.augment_stats.harvested_values if self.augment_stats else 0
             ),
             "site_index_output": str(site_index_output) if site_index_output else None,
-            "site_pages": (
-                self.site_index["summary"]["pages"] if self.site_index else 0
-            ),
-            "site_endpoints": (
-                self.site_index["summary"]["endpoints"] if self.site_index else 0
-            ),
-            "site_templates": (
-                self.site_index["summary"]["templates"] if self.site_index else 0
-            ),
-            "site_param_keys": (
-                self.site_index["summary"]["param_keys"] if self.site_index else 0
-            ),
+            "site_pages": (self.site_index["summary"]["pages"] if self.site_index else 0),
+            "site_endpoints": (self.site_index["summary"]["endpoints"] if self.site_index else 0),
+            "site_templates": (self.site_index["summary"]["templates"] if self.site_index else 0),
+            "site_param_keys": (self.site_index["summary"]["param_keys"] if self.site_index else 0),
             "chain_rounds": self.chain_rounds,
             "chain_new_specs": self.chain_new_specs,
             "manifest_output": str(manifest_output) if manifest_output else None,
@@ -1290,34 +1842,22 @@ class WebDataPipeline:
             "api_blocks": self.api_security_findings,
             "crawl_summary": self.crawl_result.summary() if self.crawl_result else None,
             "crawl_api_responses": (
-                self.crawl_result.summary().get("api_responses", 0)
-                if self.crawl_result
-                else 0
+                self.crawl_result.summary().get("api_responses", 0) if self.crawl_result else 0
             ),
             "crawl_api_response_urls": (
-                self.crawl_result.summary().get("api_response_urls", 0)
-                if self.crawl_result
-                else 0
+                self.crawl_result.summary().get("api_response_urls", 0) if self.crawl_result else 0
             ),
             "block_recoveries": (
-                self.crawl_result.summary().get("block_recoveries", 0)
-                if self.crawl_result
-                else 0
+                self.crawl_result.summary().get("block_recoveries", 0) if self.crawl_result else 0
             ),
             "recovered_pages": (
-                self.crawl_result.summary().get("recovered_pages", 0)
-                if self.crawl_result
-                else 0
+                self.crawl_result.summary().get("recovered_pages", 0) if self.crawl_result else 0
             ),
             "cloudflare": (self._cloudflare_result.to_dict() if self._cloudflare_result else None),
             "hls_downloads": sum(1 for item in self.hls_results if "error" not in item),
             "hls_errors": sum(1 for item in self.hls_results if "error" in item),
-            "asset_downloads": sum(
-                1 for item in self.media_assets if "error" not in item
-            ),
-            "asset_errors": sum(
-                1 for item in self.media_assets if "error" in item
-            ),
+            "asset_downloads": sum(1 for item in self.media_assets if "error" not in item),
+            "asset_errors": sum(1 for item in self.media_assets if "error" in item),
             "hls_output_dir": str(
                 (self.config.get("media") or self.config.get("hls") or {}).get(
                     "output_dir",
@@ -1328,6 +1868,9 @@ class WebDataPipeline:
                 "backend",
                 self.api_config.get("backend", "standard"),
             ),
+            "reverse_output": str(self.reverse_output) if self.reverse_output else None,
+            "reverse": self.reverse_summary,
+            "reverse_retry": self.reverse_retry_summary,
             "output": str(self.output),
         }
         return self.last_summary
@@ -1350,6 +1893,17 @@ class WebDataPipeline:
                     "security": security,
                 }
             )
+        if self.reverse_output is not None:
+            resources.append(
+                {
+                    "kind": "reverse",
+                    "url": None,
+                    "path": str(self.reverse_output),
+                    "status": "success" if self.reverse_output.exists() else "failed",
+                    "error": None,
+                    "summary": self.reverse_summary,
+                }
+            )
         for item in self.hls_results:
             error = item.get("error")
             resources.append(
@@ -1363,13 +1917,12 @@ class WebDataPipeline:
                     "details": item,
                 }
             )
-        media_output = (
-            self.config.get("media") or self.config.get("hls") or {}
-        ).get("output_dir")
+        media_output = (self.config.get("media") or self.config.get("hls") or {}).get("output_dir")
         return pipeline_report(
             output=self.output,
             manifest_output=self.api_config.get("manifest_output"),
             media_output=media_output,
+            reverse_output=self.reverse_output,
             resources=resources,
             summary=summary or self.last_summary,
         )
@@ -1467,6 +2020,7 @@ def _self_test() -> None:
             out = Path(tmp) / "result.json"
             config = {
                 "pages": [f"{base}/list"],
+                "reverse_output": str(Path(tmp) / "reverse.json"),
                 "api": {
                     "min_interval": 0.0,
                     "max_retries": 0,
@@ -1504,6 +2058,7 @@ def _self_test() -> None:
                     "sitemap": False,
                     "respect_robots": False,
                 },
+                "reverse_output": str(Path(tmp) / "reverse-sub.json"),
                 "api": {
                     "min_interval": 0.0,
                     "max_retries": 0,
@@ -1538,6 +2093,7 @@ def _self_test() -> None:
             chain_out = Path(tmp) / "chain-result.json"
             chain_config = {
                 "pages": [f"{base}/chain/list"],
+                "reverse_output": str(Path(tmp) / "reverse-chain.json"),
                 "api": {
                     "min_interval": 0.0,
                     "max_retries": 0,
@@ -1689,6 +2245,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="capture localStorage/sessionStorage in browser mode",
     )
+    parser.add_argument(
+        "--reverse-output",
+        default=None,
+        help="write the mandatory deep reverse report to this path",
+    )
+    parser.add_argument(
+        "--deep-hook",
+        action="store_true",
+        help="enable runtime deep hook injection (reduces stealth)",
+    )
     parser.add_argument("--output", help="override config output path")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
@@ -1712,6 +2278,12 @@ def main(argv: list[str] | None = None) -> int:
         config = _read_config(args.config)
     else:
         parser.error("--config or --url is required unless --self-test is used")
+    if args.reverse_output:
+        config["reverse_output"] = args.reverse_output
+    if args.deep_hook:
+        reverse_config = dict(config.get("reverse") or {})
+        reverse_config["hook"] = True
+        config["reverse"] = reverse_config
     pipeline = WebDataPipeline(config, output=args.output)
     summary = pipeline.run()
     from run_summary import print_report, write_report

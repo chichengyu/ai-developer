@@ -36,6 +36,32 @@
 - [Deep Turnstile container handling](#deep-turnstile-container-handling)
 - [Security detection](#security-detection)
 - [Deep crawling](#deep-crawling)
+- [Deep reverse engineering](#deep-reverse-engineering)
+- [Reverse engineering lab](#reverse-engineering-lab)
+- [Runtime deep hook](#runtime-deep-hook)
+- [Browser function probe](#browser-function-probe)
+- [One-command auto reverse](#one-command-auto-reverse)
+- [AST data-flow tracing](#ast-data-flow-tracing)
+- [Deep deobfuscation and bundle execution](#deep-deobfuscation-and-bundle-execution)
+- [Active differential verification](#active-differential-verification)
+- [CDP breakpoint probe](#cdp-breakpoint-probe)
+- [CDP return-value probe](#cdp-return-value-probe)
+- [Call-chain replay](#call-chain-replay)
+- [Webpack module takeover](#webpack-module-takeover)
+- [WASM boundary hook](#wasm-boundary-hook)
+- [Dynamic coverage filtering](#dynamic-coverage-filtering)
+- [Native API probe](#native-api-probe)
+- [Symbolic flow and z3](#symbolic-flow-and-z3)
+- [Concolic dependency tracing](#concolic-dependency-tracing)
+- [Execution trace replay](#execution-trace-replay)
+- [Oracle convergence](#oracle-convergence)
+- [Interprocedural taint](#interprocedural-taint)
+- [Byte-level capture](#byte-level-capture)
+- [Dual-browser diff](#dual-browser-diff)
+- [Vendor sensor and recipe prediction](#vendor-sensor-and-recipe-prediction)
+- [Reverse tool auto-install](#reverse-tool-auto-install)
+- [Cross-site signature knowledge](#cross-site-signature-knowledge)
+- [Session-preserving replay](#session-preserving-replay)
 - [Page/API analysis](#pageapi-analysis)
 - [API fetching and pagination](#api-fetching-and-pagination)
 - [Data processing](#data-processing)
@@ -51,6 +77,9 @@ config.json
   -> security classification
   -> optional stealth browser loop (patchright / camoufox / scrapling / nodriver /
      seleniumbase / undetected_chromedriver / drission_page / selenium)
+  -> mandatory deep reverse (deep_reverse per page, reverse_lab across captures,
+     reverse_report.json; deep_hook runtime capture is adaptive)
+  -> reverse-assisted retry for captures still blocked after bypass
   -> page/API analysis
   -> rate-limited API fetching with cookies
   -> automatic subpage parameter augmentation
@@ -81,6 +110,9 @@ Run:
 ```powershell
 python scripts/web_data_pipeline.py --config config.json
 ```
+
+The pipeline always writes `reverse_report.json` after collection; set
+`reverse_output` in the config (or pass `--reverse-output`) to change the path.
 
 `mode` defaults to `"auto"`: it enables adaptive HTTP backends, a consistent
 Chrome 124 fingerprint binding, browser escalation on blocked pages, and
@@ -1202,7 +1234,9 @@ as `recovery`, and the summary reports `block_recoveries` and
 be disabled with `--no-alternate`. API requests apply the same block recovery
 at `ApiClient` level: blocked responses sleep with backoff, rotate the pinned
 proxy, and switch the adaptive backend before returning an error. A stealth
-browser fallback can be enabled with `--browser-fallback`.
+browser fallback can be enabled with `--browser-fallback`. In
+`web_data_pipeline.py`, blocked API results are also retried with
+reverse-built fresh signatures during both normal and chained API fetching.
 
 ## Multi-site parallel crawl
 
@@ -1319,6 +1353,664 @@ The pipeline summary reports `chain_rounds` and `chain_new_specs`. Each round
 is deduplicated against every previously fetched spec, and the loop stops
 when no new parameterized spec is produced.
 
+## Deep reverse engineering
+
+`deep_reverse.py` focuses on the "why does this request work" layer. It
+extracts inline JavaScript from HTML, scores obfuscation, runs conservative
+deobfuscation passes, locates request construction sites, and finds the
+functions that build signatures, tokens, hashes, and encrypted payloads.
+
+In the end-to-end pipeline this stage is mandatory. `web_data_pipeline.py`
+analyzes each captured page with `deep_reverse.py`, feeds the per-page
+analysis and available runtime network/hook data into `reverse_lab.py`, and
+writes a combined report. The default path is `reverse_report.json`; override
+it with `reverse_output` in the config. Runtime `deep_hook.py` injection is
+adaptive by default: protected or blocked pages are collected without hook
+injection for stealth, while clean pages get a deep hook reload for request
+provenance. Set `reverse.hook: false` or `reverse.stealth: ultimate` for strict
+ultimate stealth; `reverse.hook: true` forces hooking always.
+
+If a capture is still blocked after browser escalation, `web_data_pipeline.py`
+calls `reverse_lab.build_reverse_retry_requests()` to construct fresh signed
+requests from verified signatures or extracted recipes, then retries them over
+the adaptive HTTP session. Successful responses are added back as recovered
+captures and the reverse report is regenerated.
+
+Reverse retry is on by default. Disable it with `reverse.retry_on_block:
+false`; `reverse.max_retry_requests` caps the number of signed request
+variants, and `reverse.max_retry_attempts` caps the retry rounds.
+`reverse.brute_force` is also on by default and tries short secrets up to
+`reverse.brute_max_length` (default 2) when no recipe or verified secret is
+available.
+
+```powershell
+python scripts/deep_reverse.py --html page.html --output report.json
+python scripts/deep_reverse.py --capture capture.json --deobfuscate
+python scripts/deep_reverse.py --js bundle.js --deobfuscate --output report.json
+python scripts/deep_reverse.py --js bundle.js --source-map bundle.js.map
+python scripts/deep_reverse.py --js bundle.js --dynamic-decode
+python scripts/deep_reverse.py --js bundle.js --acorn
+python scripts/deep_reverse.py --js bundle.js --install-beautifier
+python scripts/deep_reverse.py --js bundle.js --run-function genSign --args '["a","b"]'
+python scripts/deep_reverse.py --eval "Date.now()"
+```
+
+The JSON report contains:
+
+- `obfuscation` -- score and detected signals (eval/Function, packed arrays,
+  hex/unicode escapes, base64, control-flow flattening, minified source,
+  long identifiers, high entropy, dense strings)
+- `bundle` -- detected bundler framework (webpack / vite / rollup / esbuild /
+  AMD / CommonJS), webpack module count, module IDs, and named module comments
+- `bundle_cross_refs` -- functions defined in one script and referenced from
+  another, useful for split bundles where a signature function lives in a
+  different chunk than the request call site
+- `deobfuscated` -- decoded escapes, resolved `atob` / `Buffer.from`,
+  resolved `_0x...[]` string arrays, unwrapped `eval("...")`, and beautified
+  output; `--dynamic-decode` additionally executes suspected string decoders
+  in Node to resolve obfuscator-style `_0x` arrays
+- `bundle.acorn` -- function names and string literals extracted with the
+  mature `acorn` parser when `--acorn` is used (auto-installed via npx)
+- `request_sites` -- fetch / axios / XHR / jQuery call sites with headers,
+  bodies, params, line numbers, and inferred dynamic fields
+- `dynamic_fields` -- timestamps, nonces, signatures, tokens, and crypto
+  expressions with confidence scores
+- `crypto_calls` -- MD5 / SHA / HMAC / AES / RSA / Base64 / UUID / URL-encoding
+  markers
+- `signature_candidates` -- function names, algorithm hints, snippets, call
+  counts, and confidence
+- `signature_recipes` -- per-candidate parameter ordering, secret keys,
+  encoding, and replay-ready snippets
+- `device_fields` -- navigator / screen / canvas / WebGL / fonts / timezone /
+  battery / storage API usage that can feed device fingerprints
+- `timestamp_fields` -- timestamp producers with inferred unit (milliseconds,
+  seconds, hex, base36, ISO 8601) and nearby request parameter names
+- `data_flow` -- variable-level links from device / timestamp / crypto /
+  signature sources to request params, headers, body fields, and URL values
+- `ast_data_flow` -- acorn-backed edges with assignment lines and higher
+  confidence when the AST pass runs
+- `source_map` -- decoded source-map mappings and original positions when a
+  `.map` file is supplied with `--source-map`; `mapped_analysis` also maps
+  every signature candidate and request site back to its original source
+- `captured_requests` -- runtime network entries with dynamic query/body fields
+  when a PageCapture JSON is supplied
+
+The deobfuscation passes are dependency-free by default. When
+`jsbeautifier` is installed (optional group `reverse`), the beautify pass uses
+it. When Node.js is present, `--eval` and `--run-function` execute an
+expression or a named signature function in a local child process with a
+timeout, so an extracted algorithm can be verified against real inputs.
+`deep_deobfuscation.py` adds the strong-obfuscation path automatically at
+score >= 70 and `bundle_runner.py` executes whole bundles in a Node VM.
+The open-source `webcrack` CLI is auto-installed on first use through
+`npx --yes` / `npm install -g` when requested (`deep_reverse.py --webcrack`
+or `deep_reverse.webcrack_deobfuscate()`). The built-in passes remain the
+default so the module still works with no network access.
+
+```powershell
+pip install -e ".[reverse]"
+```
+
+Use `deep_reverse.py` before writing a manual signature reimplementation:
+it narrows the search to the exact functions and dynamic parameters that
+need to be reproduced.
+
+## Reverse engineering lab
+
+`reverse_lab.py` works on a set of captures instead of one page. Give it two
+or more requests to the same endpoint and it finds which parameters are
+constants, which change per request, and which are likely signatures,
+timestamps, or device fingerprints.
+
+`web_data_pipeline.py` calls `analyze_capture_set()` automatically as part of
+the mandatory reverse stage, using the per-page `deep_reverse.py` analysis and
+`deep_hook.py` runtime requests when hook injection is enabled.
+
+`build_reverse_retry_requests()` turns verified signature constructions and
+signature recipes into fresh request candidates with refreshed timestamps and
+nonces; `web_data_pipeline.py` uses these candidates to retry blocked captures
+automatically.
+
+```powershell
+python scripts/reverse_lab.py --input hook-1.json --input hook-2.json --output lab.json
+python scripts/reverse_lab.py --input hook-1.json --secrets "appKey,secretKey" --algorithms md5,hmac-sha256
+python scripts/reverse_lab.py --input hook-1.json --brute-secret --brute-max 3 --brute-charset abcdef0123456789
+python scripts/reverse_lab.py --input hook-1.json --js bundle.js --max-functions 20
+python scripts/reverse_lab.py --input hook-1.json --exclude-params ts,nonce
+```
+
+The report contains:
+
+- `request_diffs` -- constant vs changing params/headers, plus signature,
+  timestamp, and device param classification
+- `timestamp_correlations` -- timestamp values compared with hook capture time
+  to infer seconds / milliseconds / hex / base36 / ISO 8601 and clock offset;
+  `server_synced` marks timestamps that track the server clock
+- `timestamp_correlations` also scans `X-Timestamp` / `X-Time` style request
+  headers, not only query/body params
+- `server_clock_offsets` -- server `Date` / `X-Server-Time` / `X-Timestamp`
+  response headers compared with hook capture time
+- `fingerprint_tokens` -- flattened device snapshot fields with per-field
+  SHA-256 and a stable overall device fingerprint hash
+- `signature_verifications` -- common payload serializations and constructions
+  (`payload+secret`, `secret+payload`, HMAC, timestamp variants) checked
+  against real captured signature values, including auth headers such as
+  `X-Token` / `Authorization` / `Cookie`, and nested JSON bodies flattened to
+  `user.id=1` style keys; serialization variants include sorted/unsorted,
+  `&`, `;`, compact JSON, original parameter order, and the raw JSON body text
+  exactly as sent
+- `signature_consistency` -- how many independent samples each verified
+  construction matches, which filters out accidental single-request matches
+- `signature_coverages` -- for each verified signature, which request params
+  are included in the signed payload and which are excluded (`--exclude-params`
+  can test hypotheses that specific params are not signed)
+- `response_error_signals` -- 4xx/5xx response bodies classified into
+  signature / timestamp / device / parameter hints
+- `active_diff` -- oracle-guided mutation results showing which request fields
+  are signed
+- `secret_inference` -- candidate secrets and their sources from recipes,
+  storage, headers, responses, JS literals, and known patterns
+- secret candidates are auto-extracted from JS literals assigned to
+  `appKey` / `signSecret` / `token` style variables when `--js` is supplied
+- `brute_force_secrets` -- optional bounded brute force for short signature
+  secrets against the captured requests
+- `device_param_matches` -- request device/fingerprint params compared against
+  MD5 / SHA-1 / SHA-256 hashes of the captured device fingerprint snapshot
+- `storage_diffs` -- local/session storage keys that stay stable or rotate
+  between captures, useful for finding tokens, nonces, and device IDs
+- `generated_python` -- dependency-free Python replay stubs for signature
+  recipes
+- `generated_node` -- Node.js replay stubs for the same recipes
+- `generated_request_builders` -- full Python functions that build the request
+  URL, params, headers, and verified signature together
+- `generated_node_request_builders` -- equivalent Node.js request builders
+- `generated_device_python` -- Python hasher that reproduces the captured
+  device fingerprint hash from a device snapshot
+- `js_replay_verifications` -- extracted JS functions executed in Node and
+  compared against captured signature / device / timestamp values; a match
+  confirms which function actually generated the value
+
+The verification step is deliberately bounded: it needs candidate secrets
+from `--secrets`, from recipes extracted by `deep_reverse.py`, or from hook
+storage values, and tries common algorithms (MD5 / SHA-1 / SHA-256 / HMAC
+variants). A verified match means the exact composition and secret were
+reproduced against real traffic.
+
+## Runtime deep hook
+
+`deep_hook.py` installs a browser init script that wraps `fetch`,
+`XMLHttpRequest`, and `WebSocket` before page scripts run. For every API request it records
+the call stack, URL, method, headers, body, captured-at timestamp,
+performance timestamp, device fingerprint snapshot, and local/session storage
+state at call time. WebSocket `send()` frames are recorded with the same
+stack and device provenance.
+
+In `web_data_pipeline.py` this hook is adaptive by default. It is skipped on
+protected or blocked pages, then installed and followed by a reload only on
+clean pages. `reverse.hook: true` forces it always; `reverse.hook: false` or
+`reverse.stealth: ultimate` disables it for maximum stealth.
+
+When injected, the hook stores records under a per-session random,
+non-enumerable global name instead of a fixed marker. It also captures XHR
+request headers, `navigator.sendBeacon` calls, and EventSource connections in
+addition to fetch/XHR/WebSocket traffic, plus request-time cookies and
+resource timing entries. Adaptive injection additionally requires a page with
+no block, no security finding, and no CAPTCHA. A page with any risk skips hook
+injection for that page only; clean pages later in the same run remain
+eligible for the adaptive hook. The run-level summary keeps
+`adaptive_stealth_switched` as an informational flag for any risk seen, not as
+a hook lock.
+
+```powershell
+python scripts/deep_hook.py --print-hook
+python scripts/deep_hook.py --url "https://example.com/api-page" --output deep-hook.json
+python scripts/deep_hook.py --url "https://example.com" --no-headless --engine patchright
+```
+
+The JSON output combines `hook.requests` (stack + provenance + device
+snapshot) with the standard `network` capture. Device snapshots include
+navigator properties, screen metrics, canvas hash, WebGL vendor/renderer,
+timezone, referrer, window name, history length, performance resource names,
+and storage keys. This is the fastest way to see which function triggered a
+request and what device/session signals were read immediately before it.
+
+The hook output can be fed straight back into the static analyzer:
+
+```powershell
+python scripts/deep_reverse.py --capture deep-hook.json --deobfuscate
+```
+
+Browser execution requires `browser_session` plus an installed Playwright /
+Patchright engine; `--print-hook` works without a browser and the hook is
+Node-safe for syntax validation.
+
+## One-command auto reverse
+
+`deep_reverse_auto.py` is a thin orchestrator for the existing modules. It
+does not change their behavior: the same functions can still be called
+directly. One command runs runtime capture (when needed), static analysis,
+cross-request lab analysis, optional mature-library enhancement, and combined
+JSON output.
+
+```powershell
+python scripts/deep_reverse_auto.py --html page.html --js bundle.js --output auto.json
+python scripts/deep_reverse_auto.py --capture hook.json --js bundle.js --acorn --webcrack
+python scripts/deep_reverse_auto.py --url "https://example.com/api-page" --js bundle.js --headless --probe-patterns "genSign,deviceId"
+python scripts/deep_reverse_auto.py --capture hook.json --js bundle.js --deep-deobfuscation auto --run-bundle auto --auto-install
+python scripts/deep_reverse_auto.py --capture hook.json --active-diff
+```
+
+The combined report contains `deep_reverse`, `js_analysis`, `reverse_lab`,
+`source_map`, `ast_data_flow`, `function_probes`, `active_diff`,
+`secret_inference`, and an overall `summary`. Existing pipelines that call
+`deep_reverse.py` / `reverse_lab.py` directly are unaffected.
+
+## Browser function probe
+
+`function_probe.py` emits a browser init script that wraps JavaScript
+functions matching configured name/path patterns before page scripts run.
+Every wrapped call records the real arguments, return value, stack, timestamp,
+and duration. It is bounded by pattern and scan limits so it does not wrap
+the whole page.
+
+```python
+from function_probe import function_probe_js, parse_function_probes
+
+script = function_probe_js(["genSign", "deviceId", "buildFingerprint"])
+```
+
+`BrowserSession(function_probe_patterns=[...])` installs the probe alongside
+the deep hook. `session.capture_function_probes()` rescans late-bound globals
+and returns the calls. `deep_hook.py --probe-patterns` exposes the same option
+for one-shot captures. In the full pipeline:
+
+```json
+{
+  "reverse": {
+    "function_probe_patterns": ["genSign", "deviceId", "buildFingerprint"]
+  }
+}
+```
+
+## AST data-flow tracing
+
+`ast_dataflow.py` adds an acorn-backed pass on top of the regex data flow.
+It tracks variable assignments and call expressions, then maps timestamp /
+device / crypto / signature-candidate sources to the exact request target.
+When acorn is unavailable it returns a non-fatal `ok: false` result.
+
+```python
+from ast_dataflow import analyze_ast_data_flow
+from deep_reverse import analyze_js
+
+analysis = analyze_js(js)
+ast = analyze_ast_data_flow(js, analysis)
+```
+
+The edges are also merged into `analysis.ast_data_flow` when
+`analyze_js(..., auto_install=True)` runs on strong obfuscation.
+
+## Deep deobfuscation and bundle execution
+
+`deep_deobfuscation.py` leaves ordinary/minified code on the built-in fast
+path. For scripts with an obfuscation score of at least 70 (or
+`mode="always"`) it runs the deeper passes: Node dynamic string-array
+decoding, acorn validation, and webcrack when present.
+
+`bundle_runner.py` executes a whole bundle in a Node VM with browser stubs,
+scans the resulting global graph for candidate functions, calls them with
+plausible argument templates, and returns runtime traces.
+
+Both are on-demand by default:
+
+```json
+{
+  "reverse": {
+    "deep_deobfuscation": "auto",
+    "run_bundle": "auto",
+    "auto_install": true
+  }
+}
+```
+
+`auto_install` only installs acorn/webcrack when a strong-obfuscation script
+actually needs them. Set `"deep_deobfuscation": "disabled"` or
+`"run_bundle": "disabled"` to force the fast path.
+
+## Active differential verification
+
+`active_diff.py` replays a captured request while mutating one field at a
+time. A changed status/body means the field is likely signed; an unchanged
+response means it is likely unsigned. It is opt-in because it sends extra
+requests:
+
+```json
+{
+  "reverse": {
+    "active_diff": {
+      "enabled": true,
+      "max_requests": 8,
+      "min_interval": 0.5,
+      "decision_tree": true
+    }
+  }
+}
+```
+
+In `web_data_pipeline.py`, active diff uses the same session stack as API
+fetching, so cookies, proxy, UA/TLS fingerprint, and rate limits stay
+consistent. Results appear in `reverse_lab.active_diff`.
+
+`decision_tree: true` adds combination rounds: all signed fields mutated
+together, reversed parameter order, reversed header order, and timestamp
+offsets of `-1 / +1 / +60`.
+
+## CDP breakpoint probe
+
+`cdp_probe.py` sets real Chrome DevTools Protocol breakpoints at the exact
+source lines found by static analysis, then dumps the paused call frame:
+function name, URL, line/column, arguments, and `this` scope keys. This
+covers webpack closures that function-name scanning cannot reach.
+
+```python
+from cdp_probe import build_breakpoints_from_analysis, run_url_cdp_probe
+
+breakpoints = build_breakpoints_from_analysis(analysis, "bundle.js")
+capture = run_url_cdp_probe(url, breakpoints)
+```
+
+`BrowserSession.capture_cdp_function_calls(breakpoints)` exposes the same
+probe on an already-open page. In `deep_reverse_auto.py`:
+
+```powershell
+python scripts/deep_reverse_auto.py --url "https://example.com/" --js bundle.js --cdp-probe --cdp-wait-ms 6000
+```
+
+## CDP return-value probe
+
+`run_cdp_return_probe()` extends breakpoint probing with `Debugger.stepOut`:
+it captures the function entry arguments first, then resumes to the return
+frame and tries `Debugger.getReturnValue`, falling back to a caller-frame
+evaluation. This closes the real “arguments → return value” loop in the
+browser instead of relying on Node argument templates.
+
+```powershell
+python scripts/deep_reverse_auto.py --url "https://example.com/" --js bundle.js --cdp-return-probe
+```
+
+## Call-chain replay
+
+`call_chain.py` joins the deep-hook stack trace with function-probe arguments:
+
+1. parse `at genSign (bundle.js:12:3)` stack frames;
+2. match them to static signature candidates;
+3. read the real arguments from `function_probes`;
+4. replay the function in Node;
+5. verify the result against the captured `sign` / `token` value.
+
+```powershell
+python scripts/deep_reverse_auto.py --url "https://example.com/" --js bundle.js --probe-patterns "genSign" --replay-call-chain
+```
+
+## Webpack module takeover
+
+`bundle_runner.py` now extracts `__webpack_modules__` tables and invokes each
+module function directly with a fake `module` / `exports` /
+`__webpack_require__`, then scans the module exports for candidate signature
+functions. This bypasses the need to find a global reference to the loader.
+
+Results are reported as `webpack_modules_executed` and the traced functions
+are included in the normal bundle traces.
+
+## WASM boundary hook
+
+`wasm_hook.py` covers WebAssembly:
+
+- `wasm_hook_js()` installs a browser init script that wraps
+  `WebAssembly.instantiate` / `instantiateStreaming` and records exported
+  function calls with arguments and results;
+- `parse_wasm_imports_exports()` reads WASM import/export names from a local
+  binary;
+- `run_wasm_probe()` instantiates a `.wasm` file in Node with stubs and calls
+  its exports, including per-call memory changed ranges.
+- `decompile_wasm_pseudocode()` emits C-style pseudocode through `wasm2c` when
+  installed; `run_wasm_memory_write_probe()` returns per-function memory write
+  ranges.
+
+```powershell
+python scripts/deep_reverse_auto.py --url "https://example.com/" --wasm-hook
+python scripts/deep_reverse_auto.py --capture hook.json --wasm sign.wasm
+```
+
+The full pipeline enables the browser WASM hook with:
+
+```json
+{
+  "reverse": {"wasm_hook": true}
+}
+```
+
+## Dynamic coverage filtering
+
+`coverage_probe.py` starts CDP precise coverage, reloads the page, and keeps
+only functions that actually executed. `filter_candidates_by_coverage()`
+then drops static signature candidates that never ran during the real page
+load.
+
+```powershell
+python scripts/deep_reverse_auto.py --url "https://example.com/" --js bundle.js --coverage-probe
+```
+
+`BrowserSession.capture_cdp_coverage()` exposes the same probe on an open
+page.
+
+## Native API probe
+
+`native_probe.py` wraps high-value browser APIs used by signature code:
+
+- `Date.now` / `performance.now`
+- `crypto.subtle.digest`
+- `TextEncoder.encode`
+- `localStorage.setItem` / `sessionStorage.setItem`
+- `WebAssembly.Memory`
+
+```powershell
+python scripts/deep_reverse_auto.py --url "https://example.com/" --native-probe
+```
+
+Results appear as `native_calls` in the capture and `native_calls` in the
+reverse summary.
+
+## Symbolic flow and z3
+
+`symbolic_probe.py` tracks assignment-level symbolic expressions such as
+`ts = Date.now()` and `sign = md5(ts + secretKey)`, propagates variable
+references, and emits signature-derivation constraints. When `z3-solver` is
+installed, `solve_short_secret_constraints()` hands simple constraints to z3;
+otherwise it reports the missing dependency and falls back to
+`constrained_secret_search()`.
+
+```powershell
+python scripts/deep_reverse_auto.py --js bundle.js --symbolic
+```
+
+## Oracle convergence
+
+`run_active_diff_oracle()` turns active diff into an iterative loop: it reads
+the last server error hint, chooses the next mutation family (timestamp,
+signature layout, headers, params), and stops as soon as the server accepts
+the request.
+
+```json
+{
+  "reverse": {
+    "active_diff": {
+      "enabled": true,
+      "oracle": true,
+      "max_rounds": 5,
+      "max_requests": 20
+    }
+  }
+}
+```
+
+## Interprocedural taint
+
+`bundle_taint.py` joins `cross_script_refs` with per-script data flow so a
+device/timestamp/crypto source in one chunk propagates to a request target in
+another chunk. `deep_reverse.analyze_script_bundle()` includes the result as
+`interprocedural_flow`.
+
+## Concolic dependency tracing
+
+`concolic_runner.py` runs a candidate JS function with concrete arguments,
+then mutates one argument at a time. Any mutation that changes the output
+marks that argument as a real dependency. This gives a bounded concolic
+dependency graph without needing a full symbolic JS engine.
+
+```powershell
+python scripts/deep_reverse_auto.py --js bundle.js --concolic
+```
+
+## Execution trace replay
+
+`replay_trace.py` captures CDP `Debugger.scriptParsed` and
+`Runtime.consoleAPICalled` events, fetches script sources, and re-executes
+them in Node. It is a bounded execution-replay layer: the same source should
+produce the same console output and be able to reproduce signature calls
+outside the browser.
+
+```powershell
+python scripts/deep_reverse_auto.py --url "https://example.com/" --replay-trace
+```
+
+## Byte-level capture
+
+`byte_capture.py` rebuilds the exact HTTP/1.1 request bytes for a captured or
+replayed request, fingerprints them with SHA-256, and reports the first byte
+where two requests differ. Optional `mitmdump` support is included for real
+TLS-decrypted capture when installed.
+
+```powershell
+python scripts/deep_reverse_auto.py --capture hook.json --byte-compare
+```
+
+## Dual-browser diff
+
+`browser_diff.py` snapshots two URLs (clean vs protected), then reports
+injected/removed scripts, global functions, storage keys, and HTML similarity.
+This is the fastest way to locate the anti-bot injection point before deep
+reverse work starts.
+
+```powershell
+python scripts/browser_diff.py --baseline-url "https://example.com/clean" --target-url "https://example.com/" --output diff.json
+```
+
+## Vendor sensor and recipe prediction
+
+`vendor_sensor.py` contains vendor profiles for Cloudflare, DataDome, Akamai,
+and PerimeterX, runs bundles through the existing Node runner, and ranks
+verified recipes by vendor/framework frequency and hit count.
+
+```powershell
+python scripts/deep_reverse_auto.py --js bundle.js --vendor-sensor akamai
+```
+
+## Reverse tool auto-install
+
+`ensure_reverse_tools.py` installs optional binaries only when the matching
+feature is used:
+
+- `--symbolic` installs `z3-solver` through pip before constraint solving.
+- `--wasm-pseudocode` installs `wabt` / `wasm2c` through pip or npm before
+  emitting C-style pseudocode.
+- `--mitm-capture` installs `mitmproxy` through pip before running
+  `mitmdump` for TLS-decrypted byte capture.
+
+Each installer returns `ok: false` with a clear error when installation is
+not possible, so the pipeline continues with the available fallback instead
+of failing hard.
+
+```powershell
+python scripts/ensure_reverse_tools.py --status
+python scripts/ensure_reverse_tools.py --tool z3 --check
+python scripts/ensure_reverse_tools.py --tool wabt
+python scripts/ensure_reverse_tools.py --tool mitmproxy
+```
+
+## Cross-site signature knowledge
+
+`signature_knowledge.py` persists verified recipes to a JSON store and feeds
+them back as candidate secrets/algorithms on later runs. Enable it with:
+
+```json
+{
+  "reverse": {
+    "knowledge_store": "state/signature-knowledge.json"
+  }
+}
+```
+
+Every verified signature is merged back into the store with its host, URL,
+algorithm, pattern, secret, and payload example. `reverse_lab` automatically
+loads matching entries before verification. Entries auto-expire after 30 days
+by default; `prune_knowledge()`, `deprecate_entry()`, and `migrate_knowledge()`
+handle stale-variant cleanup and store migration.
+
+## Secret inference and algorithm coverage
+
+`infer_secret_candidates()` now pulls candidates from signature recipes,
+storage keys/values, request headers, response fields, JS literals, and
+known default patterns. `constrained_secret_search()` then reduces the
+brute-force alphabet with those hints and tests prefix/suffix/known-pattern
+shapes before expanding to the full alphabet. Signature verification covers:
+
+- SHA-512, SHA3-256/512, BLAKE2, and matching HMAC variants
+- payload-only, payload+secret, secret+payload, timestamp variants, header
+  inclusion, URL-path inclusion, and UTF-16LE byte encoding
+- AES-CBC / AES-GCM, ChaCha20, PBKDF2-SHA256, scrypt, and RSA PKCS#1 v1.5 /
+  OAEP when `cryptography` is installed
+- hex, base64, base64url, and reversed-hex encodings
+
+All verified constructions still require the exact digest to match real
+captured traffic; broadened coverage only adds candidate checks.
+
+## Session-preserving replay
+
+`replay_client.py` closes the loop between generated replay code and real
+requests. It reads a verified signature from a `deep_reverse_auto.py` /
+`reverse_lab.py` report, builds an `ApiSpec` with a `prepare_request` hook,
+and sends it through `ApiClient` / `SmartFetchSession`.
+
+```powershell
+python scripts/replay_client.py --report auto.json --output result.json
+python scripts/replay_client.py --report auto.json --cookie-file cookies.json --backend auto
+python scripts/replay_client.py --report auto.json --proxy "socks5://127.0.0.1:1080" --min-interval 1
+python scripts/replay_client.py --report auto.json --dry-run
+```
+
+Because the request is sent through the existing session stack, cookies,
+UA/TLS fingerprints, proxy, retries, backoff, and rate limits stay attached to
+the same identity. `ApiSpec.prepare_request` is an optional non-serialized
+hook, so existing `api_client.py` behavior is unchanged when the hook is not
+present.
+
+`web_data_pipeline.py` now also uses this automatically: after its mandatory
+reverse stage, verified replay specs are built with `build_replay_specs()` and
+appended to the normal API discovery list, so `fetch()` sends them through the
+same `ApiClient` session. Toggle with:
+
+```json
+{
+  "reverse": {
+    "replay": true
+  }
+}
+```
+
+`replay` defaults to `true`; set it to `false` to keep the old discovery-only
+behavior.
+
 ## Page/API analysis
 
 `page_data_parser.py` extracts:
@@ -1357,6 +2049,14 @@ API requests use a separate header fingerprint from page loads:
 `Accept: application/json`, `Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`,
 and `Sec-Fetch-Site: same-origin`, without the document-only
 `Sec-Fetch-User` / `Upgrade-Insecure-Requests` headers.
+
+Blocked API results are isolated per endpoint: only a result classified as a
+WAF/challenge/block is marked `risky: true` with `stealth_mode: ultimate`, and
+that endpoint's session is closed and recreated before the next endpoint.
+Clean APIs keep the original session identity and are not switched to another
+backend/proxy because another endpoint was blocked. Direct HTTP API fetches do
+not use browser deep-hook injection; deep hook applies to browser page
+captures.
 
 ```json
 {
@@ -1482,6 +2182,30 @@ so missing packages are installed on first use.
 - `api_client.py` -- API replay with retry and pagination
 - `api_analyzer.py` -- API discovery and manifest builder
 - `page_data_parser.py` -- static page/API analysis
+- `deep_reverse.py` -- JS deobfuscation and request/signature reverse analysis
+- `ast_dataflow.py` -- acorn-backed source-to-request data-flow tracing
+- `deep_deobfuscation.py` -- on-demand deep deobfuscation for strong bundles
+- `bundle_runner.py` -- whole-bundle Node VM execution and trace collection
+- `function_probe.py` -- browser-side function-level call tracing
+- `active_diff.py` -- oracle-guided active differential verification
+- `cdp_probe.py` -- CDP breakpoint-level call-frame sampling
+- `call_chain.py` -- stack-to-candidate matching and Node argument replay
+- `wasm_hook.py` -- WASM boundary hook, parser, and Node probe
+- `coverage_probe.py` -- CDP precise-coverage candidate filtering
+- `native_probe.py` -- native API call tracing
+- `symbolic_probe.py` -- symbolic expression tracing and optional z3 solving
+- `concolic_runner.py` -- bounded input-dependency concolic tracing
+- `replay_trace.py` -- CDP execution trace capture and Node replay
+- `byte_capture.py` -- raw HTTP request-byte fingerprinting and comparison
+- `browser_diff.py` -- dual-browser DOM/JS diff
+- `vendor_sensor.py` -- vendor sensor profiles and recipe prediction
+- `ensure_reverse_tools.py` -- on-demand z3 / wabt / mitmproxy installers
+- `bundle_taint.py` -- cross-chunk interprocedural taint
+- `signature_knowledge.py` -- cross-site verified-recipe reuse
+- `deep_hook.py` -- runtime fetch/XHR stack, timestamp, and device hook
+- `reverse_lab.py` -- cross-capture signature / timestamp / device lab
+- `deep_reverse_auto.py` -- one-command auto reverse orchestrator
+- `replay_client.py` -- session-preserving replay of verified signatures
 - `captcha_solver.py` -- OCR / service / manual CAPTCHA solving
 - `captcha_queue.py` -- concurrent CAPTCHA task queue
 - `browser_session.py` -- fingerprint browser with network capture

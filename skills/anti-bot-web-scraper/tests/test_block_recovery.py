@@ -9,7 +9,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from api_client import ApiClient, ApiResponse, ApiSpec  # noqa: E402
+from api_client import ApiClient, ApiFetchResult, ApiResponse, ApiSpec  # noqa: E402
 from deep_crawler import CrawlConfig, CrawledResponse, DeepCrawler  # noqa: E402
 from scrape_guard import RetryPolicy  # noqa: E402
 from smart_fetch import SmartFetchSession  # noqa: E402
@@ -89,6 +89,62 @@ def test_api_client_retries_blocked_response_with_recovery() -> None:
     assert result.error is None
     assert result.data == {"items": [{"id": 1}]}
     client._recover_blocked_identity.assert_called_once()
+
+
+def test_api_fetch_result_marks_blocked_api_risky_ultimate() -> None:
+    client = ApiClient(backend="standard", block_retries=0)
+
+    def fake_fetch(_spec: ApiSpec, timeout: float | None = None):
+        return (
+            {"challenge": "x"},
+            1,
+            ApiResponse(
+                data={"challenge": "x"},
+                status=403,
+                headers={},
+                duration_ms=1,
+            ),
+        )
+
+    client._fetch_with_pages = fake_fetch
+    result = client._fetch_result(
+        ApiSpec(method="GET", url="https://example.com/api/items")
+    )
+    assert result.error is not None
+    assert result.risky is True
+    assert result.stealth_mode == "ultimate"
+    assert result.to_dict()["risky"] is True
+
+
+def test_api_fetch_all_resets_session_after_risky_only() -> None:
+    client = ApiClient(backend="standard")
+    risky_spec = ApiSpec(method="GET", url="https://example.com/api/a")
+    clean_spec = ApiSpec(method="GET", url="https://example.com/api/b")
+    risky = ApiFetchResult(
+        spec=risky_spec,
+        error="blocked",
+        security={"blocked": True},
+        risky=True,
+        stealth_mode="ultimate",
+    )
+    clean = ApiFetchResult(
+        spec=clean_spec,
+        data={"ok": True},
+        risky=False,
+        stealth_mode="adaptive",
+    )
+    client._fetch_result = mock.Mock(side_effect=[risky, clean])
+    new_session = mock.Mock()
+    client._new_session = mock.Mock(return_value=new_session)
+
+    results = client.fetch_all([risky_spec, clean_spec])
+
+    assert results == [risky, clean]
+    client._fetch_result.assert_has_calls(
+        [mock.call(risky_spec), mock.call(clean_spec)]
+    )
+    client._new_session.assert_called_once()
+    assert client.session is new_session
 
 
 def test_deep_crawler_recovers_blocked_page() -> None:

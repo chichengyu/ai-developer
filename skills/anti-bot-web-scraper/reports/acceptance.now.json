@@ -1,0 +1,304 @@
+{
+  "generated_at": 1786461685.49957,
+  "save_paths": [
+    {
+      "role": "acceptance_report",
+      "path": "reports\\acceptance.now.json",
+      "exists": false,
+      "bytes": null
+    }
+  ],
+  "resources": [],
+  "resource_counts": {},
+  "summary": {
+    "generated_at": 1786461685.4945817,
+    "offline": false,
+    "dry_run": false,
+    "counts": {
+      "pass": 5,
+      "fail": 0,
+      "skipped": 1,
+      "error": 0,
+      "planned": 0
+    },
+    "success_rate": 0.8333,
+    "environment": {
+      "backends": {
+        "mode": "auto",
+        "backends": [
+          {
+            "name": "curl_cffi",
+            "installed": true,
+            "description": "browser TLS/JA3/JA4 + HTTP/2 impersonation"
+          },
+          {
+            "name": "tls_client",
+            "installed": true,
+            "description": "Go TLS fingerprint client"
+          },
+          {
+            "name": "cloudscraper",
+            "installed": true,
+            "description": "Cloudflare JS challenge / Turnstile solving"
+          },
+          {
+            "name": "httpx",
+            "installed": true,
+            "description": "HTTP/2 connection pooling"
+          },
+          {
+            "name": "urllib",
+            "installed": true,
+            "description": "standard-library fallback"
+          }
+        ]
+      },
+      "stealth_engines": [
+        "patchright",
+        "camoufox",
+        "scrapling",
+        "nodriver",
+        "seleniumbase",
+        "undetected_chromedriver",
+        "drission_page",
+        "selenium"
+      ],
+      "stealth_preflight": [
+        {
+          "engine": "patchright",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "engine": "camoufox",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "engine": "scrapling",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "engine": "nodriver",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "engine": "seleniumbase",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "engine": "undetected_chromedriver",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "engine": "drission_page",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "engine": "selenium",
+          "installed": true,
+          "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        }
+      ],
+      "bindings": [
+        "chrome126",
+        "chrome124",
+        "chrome120",
+        "edge124",
+        "edge126",
+        "firefox127",
+        "safari17"
+      ],
+      "fingerprint_binding": {
+        "name": "chrome126",
+        "browser_family": "chrome",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "tls_impersonate": "chrome_124",
+        "header_fingerprint": "chrome",
+        "compatible_engines": [
+          "patchright",
+          "nodriver",
+          "drission_page",
+          "seleniumbase",
+          "undetected_chromedriver",
+          "selenium"
+        ],
+        "issues": [
+          "TLS impersonation version 124 does not match user agent version 126"
+        ]
+      },
+      "captcha": {
+        "configured": false
+      },
+      "proxy_pool": {
+        "strategy": "round_robin",
+        "max_failures": 3,
+        "cooldown_seconds": 60.0,
+        "min_pool_size": 0,
+        "refill_threshold": 0,
+        "auto_remove_on_fail": true,
+        "preferred_region": null,
+        "preferred_country": null,
+        "preferred_city": null,
+        "source": null,
+        "total": 0,
+        "available": 1,
+        "use_current_ip": true,
+        "current_ip": "14.153.95.243",
+        "current_ip_source": "stun",
+        "http_egress_ip": "14.153.95.243",
+        "last_refill": 0.0,
+        "refill_errors": [],
+        "proxies": []
+      }
+    },
+    "results": [
+      {
+        "name": "cloudflare-example",
+        "url": "https://example.com/",
+        "status": "pass",
+        "duration_ms": 2656.0,
+        "error": null,
+        "details": {
+          "status": 200,
+          "security": null,
+          "blocked": false,
+          "bytes": 559,
+          "backend": "auto",
+          "proxy": "current_ip"
+        }
+      },
+      {
+        "name": "cloudflare-turnstile-product",
+        "url": "https://www.cloudflare.com/products/turnstile/",
+        "status": "pass",
+        "duration_ms": 4891.0,
+        "error": null,
+        "details": {
+          "status": 200,
+          "security": null,
+          "blocked": false,
+          "bytes": 634994,
+          "backend": "auto",
+          "proxy": "current_ip"
+        }
+      },
+      {
+        "name": "stealth-detect-page",
+        "url": "https://bot.sannysoft.com/",
+        "status": "pass",
+        "duration_ms": 1234.0,
+        "error": null,
+        "details": {
+          "status": 200,
+          "security": null,
+          "blocked": false,
+          "bytes": 25503,
+          "backend": "auto",
+          "proxy": "current_ip"
+        }
+      },
+      {
+        "name": "browser-example",
+        "url": "https://example.com/",
+        "status": "pass",
+        "duration_ms": 21656.0,
+        "error": null,
+        "details": {
+          "status": 200,
+          "engine": "patchright",
+          "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          "cookies": 0,
+          "html_bytes": 559,
+          "error": null,
+          "attempts": [
+            {
+              "engine": "patchright",
+              "error": null,
+              "headless": true,
+              "solved": true,
+              "html_length": 559,
+              "cookies": 0
+            }
+          ]
+        }
+      },
+      {
+        "name": "cloudflare-challenge-glassdoor",
+        "url": "https://www.glassdoor.com/",
+        "status": "skipped",
+        "duration_ms": 0.0,
+        "error": "proxy pool not configured or empty",
+        "details": {}
+      },
+      {
+        "name": "akamai-farfetch",
+        "url": "https://www.farfetch.com/",
+        "status": "pass",
+        "duration_ms": 7110.0,
+        "error": null,
+        "details": {
+          "passed": true,
+          "strategy": "http",
+          "status": 200,
+          "final_url": "https://www.farfetch.com/",
+          "body": "<!DOCTYPE html><html dir=\"LTR\" lang=\"zh-CN\" data-reactroot=\"\"><head><link rel=\"preconnect\" href=\"https://cdn-static.farfetch-contents.com\"/><link rel=\"dns-prefetch\" href=\"https://cdn-static.farfetch-contents.com\"/><link rel=\"preconnect\" href=\"https://cdn-images.farfetch-contents.com\"/><link rel=\"dns-prefetch\" href=\"https://cdn-images.farfetch-contents.com\"/><meta charSet=\"UTF-8\"/><title>FARFETCH 中国 | 悦享全新购物形式，选购全球时尚精品</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"/><meta name=\"description\" content=\"逛逛 FARFETCH 发发奇，发现来自普拉达（Prada）、古驰（Gucci）和范思哲（Versace） 等心仪设计师品牌的时尚精品和家居用品，享受全球特快配送与免费退货服务！\"/><meta name=\"keywords\" content=\"FARFETCH,FARFETC官网,发发奇,发发奇官网,奢侈品,奢侈品网站,奢侈品购物,奢侈品购物网站,奢侈品海淘\"/><meta name=\"mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\"/><meta name=\"apple-itunes-app\" content=\"app-id=906698760\"/><meta name=\"format-detection\" content=\"telephone=no\"/><link rel=\"canonical\" href=\"https://www.farfetch.com/cn/\"/><style>@font-face{font-family:'Nimbus Roman D';src:url(https://cdn-static.farfetch-contents.com/assets/portal-core-appportal/desktop/public/fonts/v3.00/NimbusRomanD-Regular.woff2) format('woff2'),url(https://cdn-static.farfetch-contents.com/assets/portal-core-appportal/desktop/public/fonts/v3.00/NimbusRomanD-Regular.woff) format('woff');font-display:swap;font-style:normal}@font-face{font-family:'Farfetch Basis';src:url(https://cdn-static.farfetch-contents.com/assets/portal-core-appportal/desktop/public/fonts/v3.00/FarfetchBasis-Regular.woff2) format('woff2'),url(https://cdn-static.farfetch-contents.com/assets/portal-core-appportal/desktop/public/fonts/v3.00/FarfetchBasis-Regular.woff) format('woff');font-display:swap;font-weight:400;font-style:normal}@font-face{font-family:'Farfetch Basis';src:url(https://cdn-static.farfetch-contents.com/assets/portal-core-",
+          "error": null,
+          "engine": null,
+          "cookies": [],
+          "cf_clearance": false,
+          "proxy": "current_ip",
+          "attempts": [],
+          "security": {
+            "url": "https://www.farfetch.com/",
+            "status": 200,
+            "blocked": false,
+            "primary_kind": null,
+            "actions": [],
+            "needs_browser": false,
+            "needs_proxy": false,
+            "needs_captcha": false,
+            "needs_login": false,
+            "strategy": "proceed",
+            "findings": []
+          },
+          "duration_ms": 7110.0,
+          "metrics": {
+            "counters": {
+              "task_total": {
+                "": 1.0
+              },
+              "task_success": {
+                "": 1.0
+              }
+            },
+            "gauges": {
+              "proxy_available": {
+                "": 1.0
+              }
+            },
+            "histograms": {
+              "bypass_duration_ms": {
+                "": {
+                  "count": 1,
+                  "sum": 7109.99999998603,
+                  "avg": 7109.99999998603,
+                  "max": 7109.99999998603
+                }
+              }
+            }
+          },
+          "reused_cookies": 0,
+          "saved_cookies": 0,
+          "challenge": null,
+          "snapshot_path": null
+        }
+      }
+    ]
+  }
+}

@@ -152,6 +152,7 @@ def pipeline_report(
     output: str | Path,
     manifest_output: str | Path | None = None,
     media_output: str | Path | None = None,
+    reverse_output: str | Path | None = None,
     resources: Iterable[dict[str, Any]] = (),
     summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -160,6 +161,7 @@ def pipeline_report(
         _path_info(output, "records_output"),
         _path_info(manifest_output, "api_manifest"),
         _path_info(media_output, "media_output"),
+        _path_info(reverse_output, "reverse_output"),
     ]
     return final_report(
         save_paths=save_paths,

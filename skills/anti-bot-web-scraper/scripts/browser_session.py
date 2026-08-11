@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import random
+import secrets
 import shutil
 import tempfile
 import time
@@ -27,14 +28,18 @@ from cloudflare_challenge import (
     CloudflareChallengeResult,
     extract_cloudflare_state,
 )
+from deep_hook import deep_hook_js
 from fingerprint_bank import BrowserFingerprint
 from fingerprint_binding import FingerprintBinding, resolve_binding
 from fingerprint_manager import fingerprint_patch_values
+from function_probe import function_probe_js
 from login_detector import detect_login_form, detect_login_state, detect_login_urls
+from native_probe import native_probe_js
 from page_data_parser import PageDataAnalysis, analyze_page
 from scrape_guard import RateLimiter
 from slider_solver import SliderCaptchaSolver, SliderChallenge
 from stealth_patches import apply_playwright_stealth
+from wasm_hook import wasm_hook_js
 
 _USER_AGENT_TEMPLATES = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -299,6 +304,10 @@ class PageCapture:
     finished_at: float = 0.0
     security: dict[str, Any] | None = None
     storage: dict[str, Any] | None = None
+    hook: dict[str, Any] | None = None
+    function_probes: dict[str, Any] | None = None
+    wasm_calls: dict[str, Any] | None = None
+    native_probes: dict[str, Any] | None = None
 
     def api_calls(self) -> list[NetworkEntry]:
         return [entry for entry in self.network if entry.is_api]
@@ -351,6 +360,11 @@ class PageCapture:
             "network": [entry.to_dict(include_body=include_body) for entry in self.network],
             "analysis": self.analysis.to_dict() if self.analysis is not None else None,
             "security": self.security,
+            "storage": self.storage,
+            "hook": self.hook or {},
+            "function_probes": self.function_probes or {},
+            "wasm_calls": self.wasm_calls or {},
+            "native_probes": self.native_probes or {},
         }
 
     def save(
@@ -409,6 +423,10 @@ class BrowserSession:
         captcha_solver: Any | None = None,
         slider_solver: Any | None = None,
         audio_solver: Any | None = None,
+        deep_hook: bool = False,
+        function_probe_patterns: list[str] | tuple[str, ...] | None = None,
+        wasm_hook: bool = False,
+        native_probe: bool = False,
         auto_install: bool = True,
     ) -> None:
         self.headless = headless
@@ -430,6 +448,14 @@ class BrowserSession:
         self.captcha_solver = captcha_solver
         self.slider_solver = slider_solver or SliderCaptchaSolver()
         self.audio_solver = audio_solver
+        self.deep_hook = bool(deep_hook)
+        self.deep_hook_global = "__deep_reverse_hook_" + secrets.token_hex(6)
+        self.function_probe_patterns = list(function_probe_patterns or [])
+        self.function_probe_global = "__deep_function_probe_" + secrets.token_hex(6)
+        self.wasm_hook = bool(wasm_hook)
+        self.wasm_hook_global = "__deep_wasm_hook_" + secrets.token_hex(6)
+        self.native_probe = bool(native_probe)
+        self.native_probe_global = "__deep_native_probe_" + secrets.token_hex(6)
         self.auto_install = bool(auto_install)
         self.fingerprint = (
             FingerprintOptions.from_binding(self.binding)
@@ -495,7 +521,109 @@ class BrowserSession:
             None,
             values=self.fingerprint.patch_values(),
         )
+        self._install_deep_hook_if_enabled()
         self.page = self.context.new_page()
+
+    def _install_deep_hook_if_enabled(self) -> None:
+        """Install the deep hook only when the caller opts into it."""
+        if self.deep_hook:
+            self._install_deep_hook()
+
+    def _install_deep_hook(self) -> None:
+        """Install the mandatory runtime deep-reverse request hook."""
+        if self.context is not None:
+            self.context.add_init_script(deep_hook_js(self.deep_hook_global))
+            if self.function_probe_patterns:
+                self.context.add_init_script(
+                    function_probe_js(
+                        self.function_probe_patterns,
+                        self.function_probe_global,
+                    )
+                )
+            if self.wasm_hook:
+                self.context.add_init_script(wasm_hook_js(self.wasm_hook_global))
+            if self.native_probe:
+                self.context.add_init_script(native_probe_js(self.native_probe_global))
+
+    def capture_function_probes(self) -> dict[str, Any]:
+        """Read function-level calls captured by the function probe."""
+        if self.page is None:
+            return {}
+        try:
+            self.page.evaluate(
+                f"window[{json.dumps(self.function_probe_global)}]?.rescan?.()"
+            )
+            script = f"window[{json.dumps(self.function_probe_global)}] || null"
+            hook = self.page.evaluate(script)
+            return hook if isinstance(hook, dict) else {}
+        except Exception:
+            return {}
+
+    def capture_cdp_function_calls(
+        self,
+        breakpoints: list[dict[str, Any]],
+        *,
+        reload: bool = True,
+        wait_ms: float = 5000,
+    ) -> dict[str, Any]:
+        """Run a CDP breakpoint probe against the current browser page."""
+        from cdp_probe import run_cdp_breakpoint_probe
+
+        return run_cdp_breakpoint_probe(
+            self,
+            breakpoints,
+            reload=reload,
+            wait_ms=wait_ms,
+        ).to_dict()
+
+    def capture_cdp_return_calls(
+        self,
+        breakpoints: list[dict[str, Any]],
+        *,
+        reload: bool = True,
+        wait_ms: float = 5000,
+    ) -> dict[str, Any]:
+        """Run a CDP entry + return-value probe."""
+        from cdp_probe import run_cdp_return_probe
+
+        return run_cdp_return_probe(
+            self,
+            breakpoints,
+            reload=reload,
+            wait_ms=wait_ms,
+        ).to_dict()
+
+    def capture_wasm_calls(self) -> dict[str, Any]:
+        """Read WASM export calls captured by the WASM hook."""
+        if self.page is None:
+            return {}
+        try:
+            script = f"window[{json.dumps(self.wasm_hook_global)}] || null"
+            hook = self.page.evaluate(script)
+            return hook if isinstance(hook, dict) else {}
+        except Exception:
+            return {}
+
+    def capture_cdp_coverage(self, *, wait_ms: float = 5000) -> dict[str, Any]:
+        """Run CDP precise coverage and return executed function ranges."""
+        from coverage_probe import run_cdp_coverage_probe
+
+        return run_cdp_coverage_probe(
+            self,
+            reload=True,
+            wait_ms=wait_ms,
+        ).to_dict()
+
+    def capture_native_probes(self) -> dict[str, Any]:
+        """Read native API calls captured by the native probe."""
+        if self.page is None:
+            return {}
+        try:
+            script = f"window[{json.dumps(self.native_probe_global)}] || null"
+            hook = self.page.evaluate(script)
+            return hook if isinstance(hook, dict) else {}
+        except Exception:
+            return {}
 
     def goto(
         self,
@@ -793,6 +921,17 @@ class BrowserSession:
                 except Exception:
                     storage[name] = {}
         return storage
+
+    def capture_deep_hook(self) -> dict[str, Any]:
+        """Read the runtime request provenance captured by the deep hook."""
+        if self.page is None:
+            return {}
+        try:
+            script = f"window[{json.dumps(self.deep_hook_global)}] || null"
+            hook = self.page.evaluate(script)
+            return hook if isinstance(hook, dict) else {}
+        except Exception:
+            return {}
 
     def trigger_page_events(
         self,

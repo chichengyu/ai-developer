@@ -97,6 +97,7 @@ def build_site_configs(
             config = merge_config(config, base_config)
         config["output"] = str(site_dir / "data.json")
         config["summary_output"] = str(site_dir / "summary.json")
+        config["reverse_output"] = str(site_dir / "reverse-report.json")
         config["_site_url"] = url
         config["_site_dir"] = str(site_dir)
         config.setdefault("api", {})

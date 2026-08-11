@@ -20,7 +20,7 @@
 | **desktop-app-dev** | 跨平台桌面应用架构师 | 8 步交付、24 框架选型、30 线程模板、媒体/Web 数据流水线、内置依赖中心、源码保护打包 |
 | **mobile-app-dev** | 移动应用架构师 | 8 步交付、SwiftUI/Compose/Flutter/RN 自动选型、真机验证与上架 |
 | **scraper-unblocker** | 合规网络采集助手 | 403/429/JS 挑战/WAF 诊断、robots 合规爬虫、图片/视频/HLS 深爬 |
-| **anti-bot-web-scraper** | 深度反爬数据流水线 | 自动多后端反爬：TLS 指纹模拟、Cloudflare/WAF/Turnstile、代理池、媒体/HLS 深爬 |
+| **anti-bot-web-scraper** | 深度反爬数据流水线 | 自动多后端反爬：TLS 指纹模拟、Cloudflare/WAF/Turnstile、代理池、媒体/HLS 深爬、JS 签名/设备指纹逆向 |
 | **manga-drama-video** | AI 漫剧视频导演 | 10 步审批门禁、跨集一致性、去 AI 味审计、配音/字幕/成片 |
 | **manga-drama-video-helper** | 漫剧轻量制作助手 | 三阶段剧本/素材/合成、自动续集、全自动审核模式 |
 
@@ -116,7 +116,7 @@ sequenceDiagram
 
 ### 应用与内容创作链路
 
-`desktop-app-dev` 与 `mobile-app-dev` 可独立完成从需求分析、框架选型到打包验证、交付的完整流程；`desktop-app-dev` 同时提供媒体采集、HLS 下载、Web 数据采集处理、转码发布、内置依赖中心与源码保护模板；`scraper-unblocker` 负责常规合规网站与媒体深爬，`anti-bot-web-scraper` 在 Cloudflare/WAF/Turnstile 等复杂反爬场景提供自动多后端升级流水线，可与桌面应用采集链路配合；`manga-drama-video` 提供 10 步审批门禁的完整漫剧视频流水线，`manga-drama-video-helper` 提供更轻量的三阶段版本。需要更严格的跨集一致性锁和 De-AI 审计时，可把 helper 产物转交 `manga-drama-video` 继续生产。
+`desktop-app-dev` 与 `mobile-app-dev` 可独立完成从需求分析、框架选型到打包验证、交付的完整流程；`desktop-app-dev` 同时提供媒体采集、HLS 下载、Web 数据采集处理、转码发布、内置依赖中心与源码保护模板；`scraper-unblocker` 负责常规合规网站与媒体深爬，`anti-bot-web-scraper` 在 Cloudflare/WAF/Turnstile 等复杂反爬场景提供自动多后端升级流水线与深度 JS 签名/设备指纹逆向，可与桌面应用采集链路配合；`manga-drama-video` 提供 10 步审批门禁的完整漫剧视频流水线，`manga-drama-video-helper` 提供更轻量的三阶段版本。需要更严格的跨集一致性锁和 De-AI 审计时，可把 helper 产物转交 `manga-drama-video` 继续生产。
 
 ---
 
@@ -276,7 +276,7 @@ sequenceDiagram
 
 ### anti-bot-web-scraper — 自动多后端反爬数据流水线
 
-**核心能力：** 从普通 HTTP 请求开始，按目标封锁类型自动升级后端：TLS 指纹模拟、Cloudflare/WAF/Turnstile 挑战处理、stealth 浏览器循环，直到返回可用 HTML 或 API JSON；默认 `auto` 模式在无验证码 API Key 时仍可运行，浏览器自动点击非交互挑战并自动发现/安装本地 OCR。同时覆盖代理池、登录会话、媒体/HLS/DASH/Smooth 深爬、容器元数据与字幕解析、CSS/JS/字体/数据资源爬取、API 发现与参数自动识别、WebSocket/SSE 与 DOM/JS 事件捕获、数据处理、指标与守护进程运行。
+**核心能力：** 从普通 HTTP 请求开始，按目标封锁类型自动升级后端：TLS 指纹模拟、Cloudflare/WAF/Turnstile 挑战处理、stealth 浏览器循环，直到返回可用 HTML 或 API JSON；默认 `auto` 模式在无验证码 API Key 时仍可运行，浏览器自动点击非交互挑战并自动发现/安装本地 OCR。同时覆盖代理池、登录会话、媒体/HLS/DASH/Smooth 深爬、容器元数据与字幕解析、CSS/JS/字体/数据资源爬取、API 发现与参数自动识别、WebSocket/SSE 与 DOM/JS 事件捕获、数据处理、指标与守护进程运行。深度 JS 逆向（签名/时间戳/设备指纹、反混淆、数据流与运行时请求栈捕获）是采集流水线的强制阶段，每次运行输出 `reverse_report.json`，绕过仍被封锁时会自动重建签名请求重试。
 
 功能清单：
 
@@ -292,10 +292,15 @@ sequenceDiagram
 | 全站与多站爬取 | 单 URL 自动生成全站任务并深爬子页/API；`multi_site_pipeline.py` 并行隔离执行多站，含风险感知限速、站点级重试与阻断恢复/后端轮换 |
 | API 发现与处理 | 页面/API 分析（JS body、GraphQL、WebSocket/SSE）、API 客户端分页、头部指纹、子页参数自动增强、全站 API 索引、响应驱动参数链、声明式数据清洗与 JSON/JSONL/CSV 输出 |
 | 实时事件捕获 | WebSocket/SSE 帧与事件捕获，DOM/JS 事件发现，浏览器事件触发与 storage 参数提取 |
+| 深度 JS 逆向 | `deep_reverse.py` / `reverse_lab.py` 对每个捕获页面与全部捕获做反混淆、签名/时间戳/设备指纹、数据流与 source-map 分析，强制输出 `reverse_report.json` |
+| 运行时深钩子 | `deep_hook.py` 自适应捕获 fetch/XHR 请求栈、WebSocket 帧与设备快照；受保护/封锁页默认不注入，`reverse.hook` 可强制或关闭 |
+| 签名重建与重试 | 绕过仍被封锁时自动用逆向签名构造请求重试，短密钥可暴力（默认 2 字符）；成功回写为恢复捕获，API 风险按端点隔离 |
+| 高级逆向工具箱 | `function_probe.py` / `cdp_probe.py` / `coverage_probe.py` 做函数级与断点级调用捕获；`bundle_runner.py` / `wasm_hook.py` 执行并探测 bundle/WASM；`symbolic_probe.py` / `concolic_runner.py` 追踪签名依赖 |
+| 签名知识库与会话重放 | `signature_knowledge.py` 跨站点持久化已验证配方并自动过期/迁移；`replay_client.py` 保持同一会话身份重放签名请求 |
 | 验收与依赖 | `acceptance_suite.py` 真实站点验收基线；`ensure_web_fetch_dependencies.py` 一键检测/安装 HTTP/OCR/浏览器可选依赖，`auto` 模式首次使用自动补齐 |
 | 合规边界 | 采集前确认授权，遵守 robots 与平台条款，凭据本地加密，默认限速并记录失败 |
 
-**依赖：** Python 3.8+；`smart_fetch.py` 可选 curl_cffi / cloudscraper / httpx，浏览器级能力可选 Patchright / nodriver / DrissionPage / FlareSolverr，验证码 OCR 可选 ddddocr / rapidocr_onnxruntime / easyocr / paddleocr / cnocr / pytesseract，可通过 `ensure_web_fetch_dependencies.py` 自动检测安装；`auto` 模式首次使用时按需补齐缺失依赖。
+**依赖：** Python 3.8+；`smart_fetch.py` 可选 curl_cffi / cloudscraper / httpx，浏览器级能力可选 Patchright / nodriver / DrissionPage / FlareSolverr，验证码 OCR 可选 ddddocr / rapidocr_onnxruntime / easyocr / paddleocr / cnocr / pytesseract，可通过 `ensure_web_fetch_dependencies.py` 自动检测安装；深度逆向可选 jsbeautifier / cryptography（`reverse` 可选依赖组），z3 / wabt / mitmproxy 由 `ensure_reverse_tools.py` 按需安装，Node.js 用于 bundle 执行与回放；`auto` 模式首次使用时按需补齐缺失依赖。
 
 完整命令参考：[anti-bot-web-scraper](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/anti-bot-web-scraper/SKILL.md)
 
@@ -367,4 +372,4 @@ flowchart TB
     end
 ```
 
-九个技能均可独立安装。`multi-db-analyzer` 为纯 Python 实现，`java-superpowers-contract` 附带三语言工具链，`token-economizer` 为纯指令契约零依赖；`desktop-app-dev` 提供跨平台桌面交付、媒体与 Web 数据流水线模板，`mobile-app-dev` 提供跨平台移动应用打包与验证模板，`scraper-unblocker` 负责常规合规网络采集与媒体深爬，`anti-bot-web-scraper` 负责 Cloudflare/WAF/Turnstile 等复杂反爬场景的自动多后端流水线，`manga-drama-video` 与 `manga-drama-video-helper` 负责 AI 漫剧视频制作。
+九个技能均可独立安装。`multi-db-analyzer` 为纯 Python 实现，`java-superpowers-contract` 附带三语言工具链，`token-economizer` 为纯指令契约零依赖；`desktop-app-dev` 提供跨平台桌面交付、媒体与 Web 数据流水线模板，`mobile-app-dev` 提供跨平台移动应用打包与验证模板，`scraper-unblocker` 负责常规合规网络采集与媒体深爬，`anti-bot-web-scraper` 负责 Cloudflare/WAF/Turnstile 等复杂反爬场景的自动多后端流水线与深度 JS 签名/设备指纹逆向，`manga-drama-video` 与 `manga-drama-video-helper` 负责 AI 漫剧视频制作。

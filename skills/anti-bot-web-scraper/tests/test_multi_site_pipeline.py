@@ -47,6 +47,8 @@ def test_build_site_configs_isolates_each_url() -> None:
         assert configs[0]["api"]["backoff_max"] == 45.0
         assert configs[1]["output"] != configs[0]["output"]
         assert configs[0]["summary_output"] != configs[1]["summary_output"]
+        assert configs[0]["reverse_output"].endswith("reverse-report.json")
+        assert configs[0]["reverse_output"] != configs[1]["reverse_output"]
 
 
 def test_parallel_site_crawl_runs_end_to_end() -> None:

@@ -48,12 +48,14 @@ ADVANCED_BROWSER_PACKAGES = ("camoufox", "scrapling", "msgspec")
 MEDIA_PACKAGES = ("cryptography",)
 OCR_PACKAGES = ("pillow", "ddddocr")
 OCR_TESSERACT_PACKAGES = ("pillow", "pytesseract")
+REVERSE_PACKAGES = ("jsbeautifier", "cryptography")
 ALL_WEB_FETCH_PACKAGES = (
     *WEB_FETCH_PACKAGES,
     *STEALTH_BROWSER_PACKAGES,
     *SELENIUM_PACKAGES,
     *ADVANCED_BROWSER_PACKAGES,
     *MEDIA_PACKAGES,
+    *REVERSE_PACKAGES,
 )
 WEB_FETCH_LABELS = {
     "curl_cffi": "browser TLS/JA3/JA4 + HTTP/2 impersonation",
@@ -81,6 +83,7 @@ WEB_FETCH_LABELS = {
     "easyocr": "EasyOCR engine for local CAPTCHA solving",
     "paddleocr": "PaddleOCR engine for local CAPTCHA solving",
     "cnocr": "CnOcr engine for Chinese CAPTCHA solving",
+    "jsbeautifier": "optional JS beautifier for deep_reverse.py",
 }
 ProgressFn = Callable[[str, float | None, str], None]
 
@@ -209,6 +212,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="only check/install local CAPTCHA OCR packages",
     )
+    parser.add_argument(
+        "--reverse-only",
+        action="store_true",
+        help="only check/install deep_reverse.py optional packages",
+    )
     args = parser.parse_args(argv)
     packages = (
         [item.strip() for item in args.packages.split(",") if item.strip()]
@@ -227,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         packages = list(MEDIA_PACKAGES)
     elif args.ocr_only and packages is None:
         packages = list(OCR_PACKAGES)
+    elif args.reverse_only and packages is None:
+        packages = list(REVERSE_PACKAGES)
     result = ensure(install=not args.check, packages=packages)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ready") or args.check else 1

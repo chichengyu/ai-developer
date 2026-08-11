@@ -15,6 +15,7 @@ import random
 import threading
 import time
 import urllib.parse
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,7 @@ class ApiSpec:
     source: str = "captured"
     pagination: dict[str, Any] | None = None
     content_type: str | None = None
+    prepare_request: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +69,7 @@ class ApiSpec:
             source=str(data.get("source", "captured") or "captured"),
             pagination=dict(data["pagination"]) if data.get("pagination") else None,
             content_type=data.get("content_type"),
+            prepare_request=None,
         )
 
 
@@ -80,6 +83,8 @@ class ApiFetchResult:
     headers: dict[str, str] | None = None
     duration_ms: float | None = None
     security: dict[str, Any] | None = None
+    risky: bool = False
+    stealth_mode: str = "adaptive"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,6 +96,8 @@ class ApiFetchResult:
             "headers": self.headers,
             "duration_ms": self.duration_ms,
             "security": self.security,
+            "risky": self.risky,
+            "stealth_mode": self.stealth_mode,
         }
 
 
@@ -394,11 +401,9 @@ class ApiClient:
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
     ) -> ApiResponse:
-        url = spec.url
         merged_params = dict(spec.params or {})
         if params:
             merged_params.update(params)
-        url = _build_url(url, merged_params or None)
         headers = dict(spec.headers or {})
         headers.setdefault("Accept", "application/json, text/plain, */*")
         headers.setdefault("Sec-Fetch-Dest", "empty")
@@ -407,6 +412,24 @@ class ApiClient:
         headers.pop("Sec-Fetch-User", None)
         headers.pop("Upgrade-Insecure-Requests", None)
         body = spec.body
+        url = spec.url
+        if spec.prepare_request is not None:
+            context = (
+                spec.prepare_request(
+                    {
+                        "url": url,
+                        "params": merged_params,
+                        "headers": headers,
+                        "body": body,
+                    }
+                )
+                or {}
+            )
+            url = str(context.get("url", url))
+            merged_params = dict(context.get("params", merged_params))
+            headers = dict(context.get("headers", headers))
+            body = context.get("body", body)
+        url = _build_url(url, merged_params or None)
         json_body = body if isinstance(body, dict | list) else None
         data = None if json_body is not None else body
         started = time.monotonic()
@@ -552,6 +575,20 @@ class ApiClient:
         if rotate_backend is not None:
             rotate_backend()
 
+    def _cookie_snapshot(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": cookie.name,
+                "value": cookie.value,
+                "domain": cookie.domain,
+                "path": cookie.path,
+                "secure": cookie.secure,
+                "expires": cookie.expires,
+                "session": cookie.discard,
+            }
+            for cookie in self.session.cookies
+        ]
+
     def _fetch_result(
         self,
         spec: ApiSpec,
@@ -562,9 +599,7 @@ class ApiClient:
                 data, pages, meta = self._fetch_with_pages(spec, timeout=timeout)
             except Exception as exc:
                 if attempt < self.block_retries:
-                    wait = self.block_retry_delay * (
-                        self.block_retry_backoff ** attempt
-                    )
+                    wait = self.block_retry_delay * (self.block_retry_backoff**attempt)
                     time.sleep(wait + random.uniform(0.0, min(1.0, wait * 0.1)))
                     self._recover_blocked_identity()
                     continue
@@ -591,17 +626,14 @@ class ApiClient:
                     security = report.to_dict()
                     error = f"blocked by {report.primary_kind}"
                     if attempt < self.block_retries:
-                        wait = self.block_retry_delay * (
-                            self.block_retry_backoff ** attempt
-                        )
-                        time.sleep(
-                            wait + random.uniform(0.0, min(1.0, wait * 0.1))
-                        )
+                        wait = self.block_retry_delay * (self.block_retry_backoff**attempt)
+                        time.sleep(wait + random.uniform(0.0, min(1.0, wait * 0.1)))
                         self._recover_blocked_identity()
                         continue
                 elif meta.status >= 400:
                     security = report.to_dict()
                     error = f"HTTP {meta.status}"
+            risky = bool(security and security.get("blocked"))
             return ApiFetchResult(
                 spec=spec,
                 data=data,
@@ -611,6 +643,8 @@ class ApiClient:
                 duration_ms=meta.duration_ms if meta is not None else None,
                 security=security,
                 error=error,
+                risky=risky,
+                stealth_mode="ultimate" if risky else "adaptive",
             )
         return ApiFetchResult(spec=spec, error="block recovery exhausted")
 
@@ -622,22 +656,17 @@ class ApiClient:
         results: list[ApiFetchResult] = []
         if concurrency <= 1:
             for spec in specs:
-                results.append(self._fetch_result(spec))
+                result = self._fetch_result(spec)
+                if result.risky:
+                    saved_cookies = self._cookie_snapshot()
+                    self.session.close()
+                    self.session = self._new_session()
+                    self.add_cookies(saved_cookies)
+                results.append(result)
             return results
 
         def worker(spec: ApiSpec) -> ApiFetchResult:
-            cookies = [
-                {
-                    "name": cookie.name,
-                    "value": cookie.value,
-                    "domain": cookie.domain,
-                    "path": cookie.path,
-                    "secure": cookie.secure,
-                    "expires": cookie.expires,
-                    "session": cookie.discard,
-                }
-                for cookie in self.session.cookies
-            ]
+            cookies = self._cookie_snapshot()
             client = ApiClient(
                 headers=self.headers,
                 proxy=self.proxy,
