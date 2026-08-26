@@ -5,11 +5,11 @@
   <img src="https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/Node.js-18%2B-green?logo=nodedotjs&logoColor=white" />
   <img src="https://img.shields.io/badge/Codex-Skill-blueviolet" />
-  <img src="https://img.shields.io/badge/Codex%20Plugin-v1.0.0-blueviolet?logo=openai&logoColor=white" />
+  <img src="https://img.shields.io/badge/Codex%20Plugin-v1.0.0-blueviolet" />
   <img src="https://img.shields.io/badge/license-MIT-green" />
 </p>
 
-一个面向中文开发者的 Codex 技能与插件仓库：包含 9 个可独立安装的 Codex 技能，并打包成一个可整体安装的 `ai-developer` 插件。技能源目录是 `skills/skills/`，插件位于 `plugin/ai-developer/`，插件内部保存独立副本，不会影响原始技能。
+一个面向中文开发者的 Codex 技能与插件仓库：包含 9 个可独立安装的 Codex 技能，并打包成一个可整体安装的 `ai-developer-skill-pack` 插件。技能源目录是 `skills/skills/`，插件位于 `plugin/ai-developer-skill-pack/`，插件内部保存独立副本，不会影响原始技能。
 
 <a id="toc"></a>
 ## 目录
@@ -26,7 +26,7 @@
   - [anti-bot-web-scraper](#anti-bot-web-scraper)
   - [manga-drama-video](#manga-drama-video)
   - [manga-drama-video-helper](#manga-drama-video-helper)
-- [插件：ai-developer](#插件ai-developer)
+- [插件：ai-developer-skill-pack](#插件ai-developer-skill-pack)
 - [刷新插件副本](#刷新插件副本)
 
 <a id="项目简介"></a>
@@ -35,7 +35,7 @@
 本项目提供两种使用方式：
 
 1. **Skills 方式**：从 `skills/skills/` 复制任意技能到 `~/.codex/skills/` 即可独立使用，技能包文档见 [skills/README.md](./skills/README.md)。
-2. **Plugin 方式**：安装 `plugin/ai-developer` 插件，一次获得全部 9 个技能；插件内的技能是独立副本，与源技能互不影响。
+2. **Plugin 方式**：安装 `plugin/ai-developer-skill-pack` 插件，一次获得全部 9 个技能；插件内的技能是独立副本，与源技能互不影响。
 
 技能覆盖 Java 研发现控、跨平台桌面/移动应用交付、多数据库分析、合规网络采集与反爬、AI 漫剧视频制作、Token 输出压缩等场景。
 
@@ -46,7 +46,7 @@
 ai-developer/
 ├── README.md            # 本文件
 ├── plugin/              # Codex 插件
-│   └── ai-developer/
+│   └── ai-developer-skill-pack/
 │       ├── .codex-plugin/plugin.json
 │       ├── README.md
 │       └── skills/      # 技能独立副本
@@ -115,26 +115,26 @@ Java 项目研发现控契约：最小改动、环境物理隔离、SQL 回滚�
 
 漫剧轻量制作助手，从一句话故事或完整剧本出发，自动完成多集剧本、人物/场景素材、配音配乐与最终视频合成。
 
-<a id="插件ai-developer"></a>
-## 插件：ai-developer
+<a id="插件ai-developer-skill-pack"></a>
+## 插件：ai-developer-skill-pack
 
 插件把全部 9 个技能打包为一个可整体安装的 Codex 插件，适合直接分发或部署：
 
-- 插件目录：[plugin/ai-developer/](./plugin/ai-developer)
-- 插件清单：[plugin/ai-developer/.codex-plugin/plugin.json](./plugin/ai-developer/.codex-plugin/plugin.json)
-- 插件说明：[plugin/ai-developer/README.md](./plugin/ai-developer/README.md)
-- 技能副本：[plugin/ai-developer/skills/](./plugin/ai-developer/skills)
+- 插件目录：[plugin/ai-developer-skill-pack/](./plugin/ai-developer-skill-pack)
+- 插件清单：[plugin/ai-developer-skill-pack/.codex-plugin/plugin.json](./plugin/ai-developer-skill-pack/.codex-plugin/plugin.json)
+- 插件说明：[plugin/ai-developer-skill-pack/README.md](./plugin/ai-developer-skill-pack/README.md)
+- 技能副本：[plugin/ai-developer-skill-pack/skills/](./plugin/ai-developer-skill-pack/skills)
 
 安装：
 
 ```bash
-codex plugin install ./plugin/ai-developer
+codex plugin install ./plugin/ai-developer-skill-pack
 ```
 
 校验：
 
 ```bash
-python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plugin/ai-developer
+python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plugin/ai-developer-skill-pack
 ```
 
 当前插件未生成 `marketplace.json`；如需接入 Codex 个人市场，可使用 plugin-creator 的 `--with-marketplace` 生成市场条目。
@@ -145,7 +145,7 @@ python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plug
 插件内是独立副本而非软链，源技能更新后需要手动同步：
 
 ```bash
-$src = "./skills/skills"; $dst = "./plugin/ai-developer/skills";
+$src = "./skills/skills"; $dst = "./plugin/ai-developer-skill-pack/skills";
 foreach ($d in Get-ChildItem $src -Directory) {
   Copy-Item -Path $d.FullName -Destination $dst -Recurse -Force
 }
