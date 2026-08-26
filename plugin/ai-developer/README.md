@@ -1,5 +1,11 @@
 # AI Developer 插件
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Codex%20Plugin-v1.0.0-blueviolet?logo=openai&logoColor=white" alt="Codex Plugin" />
+  <img src="https://img.shields.io/badge/Built-in%20Skills-9-blue?logo=openai&logoColor=white" alt="9 built-in skills" />
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
+</p>
+
 一个 Codex 个人插件，把仓库内的 9 个技能打包为单一可安装单元。插件目录为 `plugin/ai-developer/`，并在 `./skills/` 下保存全部技能的独立副本，可脱离源技能树单独打包、分发和安装。
 
 ## 目录结构
@@ -23,17 +29,43 @@ plugin/ai-developer/
 
 ## 内置技能
 
-| 技能 | 用途 | 入口 |
+插件一次安装 9 个技能，按使用场景分为 4 组：
+
+| 场景 | 技能 |
 | --- | --- |
-| [anti-bot-web-scraper](./skills/anti-bot-web-scraper/SKILL.md) | Cloudflare / WAF / Turnstile 绕过、CAPTCHA 处理、代理轮换、声明式数据处理 | [SKILL.md](./skills/anti-bot-web-scraper/SKILL.md) |
-| [desktop-app-dev](./skills/desktop-app-dev/SKILL.md) | 跨平台桌面 GUI 应用交付（Windows / macOS / Linux），8 步工作流 | [SKILL.md](./skills/desktop-app-dev/SKILL.md) |
+| **研发工程** | [`java-superpowers-contract`](./skills/java-superpowers-contract/SKILL.md) · [`multi-db-analyzer`](./skills/multi-db-analyzer/SKILL.md) · [`token-economizer`](./skills/token-economizer/SKILL.md) |
+| **应用交付** | [`desktop-app-dev`](./skills/desktop-app-dev/SKILL.md) · [`mobile-app-dev`](./skills/mobile-app-dev/SKILL.md) |
+| **网络采集** | [`scraper-unblocker`](./skills/scraper-unblocker/SKILL.md) · [`anti-bot-web-scraper`](./skills/anti-bot-web-scraper/SKILL.md) |
+| **漫剧视频** | [`manga-drama-video`](./skills/manga-drama-video/SKILL.md) · [`manga-drama-video-helper`](./skills/manga-drama-video-helper/SKILL.md) |
+
+### 研发工程
+
+| 技能 | 说明 | 入口 |
+| --- | --- | --- |
 | [java-superpowers-contract](./skills/java-superpowers-contract/SKILL.md) | Java 研发现控契约：最小改动、环境隔离、SQL 回滚红线、审计 | [SKILL.md](./skills/java-superpowers-contract/SKILL.md) |
+| [multi-db-analyzer](./skills/multi-db-analyzer/SKILL.md) | 多数据库分析：SQL / NoSQL / 时序 / 向量库查询与报告 | [SKILL.md](./skills/multi-db-analyzer/SKILL.md) |
+| [token-economizer](./skills/token-economizer/SKILL.md) | 全局 Token 精约与响应压缩引擎 | [SKILL.md](./skills/token-economizer/SKILL.md) |
+
+### 应用交付
+
+| 技能 | 说明 | 入口 |
+| --- | --- | --- |
+| [desktop-app-dev](./skills/desktop-app-dev/SKILL.md) | 跨平台桌面 GUI 应用交付（Windows / macOS / Linux），8 步工作流 | [SKILL.md](./skills/desktop-app-dev/SKILL.md) |
+| [mobile-app-dev](./skills/mobile-app-dev/SKILL.md) | 跨平台移动应用交付：iOS / Android / visionOS / Wear OS 自动选型 | [SKILL.md](./skills/mobile-app-dev/SKILL.md) |
+
+### 网络采集
+
+| 技能 | 说明 | 入口 |
+| --- | --- | --- |
+| [scraper-unblocker](./skills/scraper-unblocker/SKILL.md) | 稳健爬虫：自动反爬诊断与多后端重试 | [SKILL.md](./skills/scraper-unblocker/SKILL.md) |
+| [anti-bot-web-scraper](./skills/anti-bot-web-scraper/SKILL.md) | 深度反爬数据流水线：Cloudflare / WAF / Turnstile、代理池、JS 逆向 | [SKILL.md](./skills/anti-bot-web-scraper/SKILL.md) |
+
+### 漫剧视频
+
+| 技能 | 说明 | 入口 |
+| --- | --- | --- |
 | [manga-drama-video](./skills/manga-drama-video/SKILL.md) | AI 漫剧视频端到端流水线，严格检查点与用户确认门禁 | [SKILL.md](./skills/manga-drama-video/SKILL.md) |
 | [manga-drama-video-helper](./skills/manga-drama-video-helper/SKILL.md) | 漫剧制作助手：剧本、素材生成、配音与最终合成 | [SKILL.md](./skills/manga-drama-video-helper/SKILL.md) |
-| [mobile-app-dev](./skills/mobile-app-dev/SKILL.md) | 跨平台移动应用交付：iOS / Android / visionOS / Wear OS 自动选型 | [SKILL.md](./skills/mobile-app-dev/SKILL.md) |
-| [multi-db-analyzer](./skills/multi-db-analyzer/SKILL.md) | 多数据库分析：SQL / NoSQL / 时序 / 向量库查询与报告 | [SKILL.md](./skills/multi-db-analyzer/SKILL.md) |
-| [scraper-unblocker](./skills/scraper-unblocker/SKILL.md) | 稳健爬虫：自动反爬诊断与多后端重试 | [SKILL.md](./skills/scraper-unblocker/SKILL.md) |
-| [token-economizer](./skills/token-economizer/SKILL.md) | 全局 Token 精约与响应压缩引擎 | [SKILL.md](./skills/token-economizer/SKILL.md) |
 
 ## 安装
 

@@ -5,6 +5,7 @@
   <img src="https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/Node.js-18%2B-green?logo=nodedotjs&logoColor=white" />
   <img src="https://img.shields.io/badge/Codex-Skill-blueviolet" />
+  <img src="https://img.shields.io/badge/Codex%20Plugin-v1.0.0-blueviolet?logo=openai&logoColor=white" />
   <img src="https://img.shields.io/badge/license-MIT-green" />
 </p>
 
