@@ -1,4 +1,13 @@
 # ai-developer
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Java-17%2B-orange?logo=openjdk&logoColor=white" />
+  <img src="https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/Node.js-18%2B-green?logo=nodedotjs&logoColor=white" />
+  <img src="https://img.shields.io/badge/Codex-Skill-blueviolet" />
+  <img src="https://img.shields.io/badge/license-MIT-green" />
+</p>
+
 A personal Codex workspace that ships nine curated skills and bundles them into a single installable plugin. The source of truth for every skill is `skills/`; the plugin at `plugin/ai-developer/` carries its own independent copy under `plugin/ai-developer/skills/`.
 ## Layout
 ```
