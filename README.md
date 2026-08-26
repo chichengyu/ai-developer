@@ -1,4 +1,4 @@
-﻿# ai-developer-skill — AI开发者 Codex 技能套件
+﻿# ai-developer — AI开发者 Codex 技能套件
 
 <p align="center">
   <img src="https://img.shields.io/badge/Java-17%2B-orange?logo=openjdk&logoColor=white" />
@@ -10,7 +10,7 @@
 
 ## 项目简介
 
-**ai-developer-skill** 是一套专为 AI开发者的 Codex 技能集合，覆盖 Java 研发现控、跨平台应用交付与桌面数据流水线、AI 漫剧视频制作和合规网络采集。本套件包含九个可独立安装的技能：
+**ai-developer** 是一套专为 AI开发者的 Codex 技能集合，覆盖 Java 研发现控、跨平台应用交付与桌面数据流水线、AI 漫剧视频制作和合规网络采集。本套件包含九个可独立安装的技能：
 
 | 技能 | 角色 | 关键能力 |
 |------|------|----------|
@@ -31,7 +31,7 @@
 ## 目录结构
 
 ```
-ai-developer-skill/
+ai-developer/
 +-- README.md
 +-- LICENSE
 +-- .gitattributes
@@ -86,7 +86,7 @@ pip install qdrant-client     # Qdrant
 **方式二：对话安装（复制给 Codex）**
 
 ```
-帮我从仓库 [chichengyu/ai-developer-skill](https://github.com/chichengyu/ai-developer-skill) 安装 multi-db-analyzer、java-superpowers-contract、token-economizer、desktop-app-dev、mobile-app-dev、scraper-unblocker、anti-bot-web-scraper、manga-drama-video 和 manga-drama-video-helper 技能到 ~/.codex/skills/ 目录下
+帮我从仓库 [chichengyu/ai-developer](https://github.com/chichengyu/ai-developer) 安装 multi-db-analyzer、java-superpowers-contract、token-economizer、desktop-app-dev、mobile-app-dev、scraper-unblocker、anti-bot-web-scraper、manga-drama-video 和 manga-drama-video-helper 技能到 ~/.codex/skills/ 目录下
 ```
 
 ---
@@ -152,7 +152,7 @@ sequenceDiagram
 
 **入口：** `scripts/database_query.py`（纯 Python 实现，统一 CLI 接口）
 
-完整命令参考：[multi-db-analyzer](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/multi-db-analyzer/SKILL.md)
+完整命令参考：[multi-db-analyzer](https://github.com/chichengyu/ai-developer/blob/main/skills/multi-db-analyzer/SKILL.md)
 
 ---
 
@@ -174,7 +174,7 @@ sequenceDiagram
 | 安全审查 | SQL 注入检测、密钥硬编码检查、API 兼容性检查 |
 | 执行审计 | 每次回复附带【执行审计】报告 |
 
-完整命令参考：[java-superpowers-contract](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/java-superpowers-contract/SKILL.md)
+完整命令参考：[java-superpowers-contract](https://github.com/chichengyu/ai-developer/blob/main/skills/java-superpowers-contract/SKILL.md)
 
 
 
@@ -198,7 +198,7 @@ sequenceDiagram
 
 **依赖：** 零外部依赖，纯指令契约，在输出端对前两者叠加压缩。
 
-完整命令参考：[token-economizer](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/token-economizer/SKILL.md)
+完整命令参考：[token-economizer](https://github.com/chichengyu/ai-developer/blob/main/skills/token-economizer/SKILL.md)
 
 ---
 
@@ -229,7 +229,7 @@ sequenceDiagram
 
 **依赖：** 按所选框架安装对应工具链（.NET / Rust / Python / Go / Kotlin / Swift 等），模板自带 PyInstaller、dotnet publish、Tauri 等打包方案；构建工具链默认 DryRun，显式 `-Install` 才安装；媒体/Web 可选依赖可通过 `ensure_all_dependencies.py` / `ensure_web_fetch_dependencies.py` 或内置依赖中心按需检测安装。
 
-完整命令参考：[desktop-app-dev](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/desktop-app-dev/SKILL.md)
+完整命令参考：[desktop-app-dev](https://github.com/chichengyu/ai-developer/blob/main/skills/desktop-app-dev/SKILL.md)
 
 ---
 
@@ -251,7 +251,7 @@ sequenceDiagram
 
 **依赖：** 按所选框架安装 Xcode / Android Studio / Flutter / RN / .NET 等工具链；`verify_mobile.ps1` 可自动生成验证报告。
 
-完整命令参考：[mobile-app-dev](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/mobile-app-dev/SKILL.md)
+完整命令参考：[mobile-app-dev](https://github.com/chichengyu/ai-developer/blob/main/skills/mobile-app-dev/SKILL.md)
 
 ### scraper-unblocker — 合规网络采集与媒体深爬
 
@@ -270,7 +270,7 @@ sequenceDiagram
 
 **依赖：** Python 3.8+ 标准库即可运行；可选 Playwright / Selenium 渲染 JS 页面，ffmpeg 用于 HLS 合并。
 
-完整命令参考：[scraper-unblocker](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/scraper-unblocker/SKILL.md)
+完整命令参考：[scraper-unblocker](https://github.com/chichengyu/ai-developer/blob/main/skills/scraper-unblocker/SKILL.md)
 
 ---
 
@@ -302,7 +302,7 @@ sequenceDiagram
 
 **依赖：** Python 3.8+；`smart_fetch.py` 可选 curl_cffi / cloudscraper / httpx，浏览器级能力可选 Patchright / nodriver / DrissionPage / FlareSolverr，验证码 OCR 可选 ddddocr / rapidocr_onnxruntime / easyocr / paddleocr / cnocr / pytesseract，可通过 `ensure_web_fetch_dependencies.py` 自动检测安装；深度逆向可选 jsbeautifier / cryptography（`reverse` 可选依赖组），z3 / wabt / mitmproxy 由 `ensure_reverse_tools.py` 按需安装，Node.js 用于 bundle 执行与回放；`auto` 模式首次使用时按需补齐缺失依赖。
 
-完整命令参考：[anti-bot-web-scraper](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/anti-bot-web-scraper/SKILL.md)
+完整命令参考：[anti-bot-web-scraper](https://github.com/chichengyu/ai-developer/blob/main/skills/anti-bot-web-scraper/SKILL.md)
 
 ---
 
@@ -324,7 +324,7 @@ sequenceDiagram
 
 **依赖：** FFmpeg、VapourSynth 及当前配置的图片/视频/配音模型 API；本地 ComfyUI + Wan / HunyuanVideo / LTX-Video 可选。
 
-完整命令参考：[manga-drama-video](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/manga-drama-video/SKILL.md)
+完整命令参考：[manga-drama-video](https://github.com/chichengyu/ai-developer/blob/main/skills/manga-drama-video/SKILL.md)
 
 ---
 
@@ -346,7 +346,7 @@ sequenceDiagram
 
 **依赖：** 当前模型/API 与 FFmpeg；可选 Seedream、即梦 Seedance、MiniMax-Hailuo 等云引擎。
 
-完整命令参考：[manga-drama-video-helper](https://github.com/chichengyu/ai-developer-skill/blob/main/skills/manga-drama-video-helper/SKILL.md)
+完整命令参考：[manga-drama-video-helper](https://github.com/chichengyu/ai-developer/blob/main/skills/manga-drama-video-helper/SKILL.md)
 
 ---
 
