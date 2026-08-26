@@ -49,6 +49,8 @@ ai-developer/
 ├── .cursor-plugin/marketplace.json   # Cursor marketplace
 ├── .opencode/INSTALL.md              # OpenCode 安装说明
 ├── README.md            # 本文件
+├── scripts/
+│   └── install_skills.py  # 通用 Agent 安装器
 ├── plugin/              # 插件包（跨桌面 Agent）
 │   └── ai-developer-skill-plugin/
 │       ├── .codex-plugin/plugin.json
@@ -148,16 +150,19 @@ codex plugin install ./plugin/ai-developer-skill-plugin
 
 ```bash
 git clone https://github.com/chichengyu/ai-developer.git
-python3 ai-developer/scripts/install_skills.py
+cd ai-developer
+python3 scripts/install_skills.py
 ```
 
-脚本默认自动检测本机已安装的桌面 Agent；`--dry-run` 可先查看安装计划。
+脚本默认自动检测本机已安装的 Codex、Claude、Cursor、Gemini 和 OpenCode；`--list` 可查看支持的目录，`--dry-run` 可先查看安装计划。
 
 也可以安装到所有已知 Agent，或指定任意 Agent 的 skills 目录：
 
 ```bash
-python3 ai-developer/scripts/install_skills.py --all
-python3 ai-developer/scripts/install_skills.py --dest <你的Agent skills目录>
+python3 scripts/install_skills.py --list
+python3 scripts/install_skills.py --all
+python3 scripts/install_skills.py --agent claude
+python3 scripts/install_skills.py --dest <你的Agent skills目录>
 ```
 
 没有 Python 环境时，直接把 `skills/skills/*` 复制到目标 Agent 的 skills 目录即可。
