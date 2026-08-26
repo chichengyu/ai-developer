@@ -4,10 +4,10 @@
   "description": "Bundles nine Codex skills for web scraping, desktop/mobile apps, multi-DB analysis, manga-drama video production, and contract-driven Java work into a single installable plugin.",
   "author": {
     "name": "ai-developer maintainers",
-    "url": "https://github.com/ai-developer/ai-developer"
+    "url": "https://github.com/chichengyu/ai-developer"
   },
-  "homepage": "https://github.com/ai-developer/ai-developer#readme",
-  "repository": "https://github.com/ai-developer/ai-developer",
+  "homepage": "https://github.com/chichengyu/ai-developer#readme",
+  "repository": "https://github.com/chichengyu/ai-developer",
   "license": "MIT",
   "keywords": [
     "scraping",

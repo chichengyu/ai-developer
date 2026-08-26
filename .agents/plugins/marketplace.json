@@ -1,0 +1,20 @@
+{
+  "name": "ai-developer",
+  "interface": {
+    "displayName": "AI Developer"
+  },
+  "plugins": [
+    {
+      "name": "ai-developer-skill-plugin",
+      "source": {
+        "source": "local",
+        "path": "./plugin/ai-developer-skill-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

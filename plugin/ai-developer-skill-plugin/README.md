@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
 </p>
 
-一个 Codex 个人插件，把仓库内的 9 个技能打包为单一可安装单元。插件目录为 `plugin/ai-developer-skill-plugin/`，并在 `./skills/` 下保存全部技能的独立副本，可脱离源技能树单独打包、分发和安装。
+一个跨桌面 Agent 的技能插件包，把仓库内的 9 个技能打包为单一可安装单元。插件目录为 `plugin/ai-developer-skill-plugin/`，并在 `./skills/` 下保存全部技能的独立副本，可脱离源技能树单独打包、分发和安装。
 
 ## 目录结构
 
@@ -69,13 +69,25 @@ plugin/ai-developer-skill-plugin/
 
 ## 安装
 
-插件为本地插件，当前未生成 `marketplace.json`，可直接让 Codex 读取插件清单：
+仓库根目录已提供 Codex、Claude、Cursor 三个 marketplace 入口，可直接从远程仓库安装：
+
+```bash
+codex plugin marketplace add https://github.com/chichengyu/ai-developer.git
+codex plugin add ai-developer-skill-plugin@ai-developer
+```
+
+本地开发调试可改用：
 
 ```bash
 codex plugin install ./plugin/ai-developer-skill-plugin
 ```
 
-如需生成个人市场条目，可用 plugin-creator 脚手架重跑并加上 `--with-marketplace`。
+### 其他桌面 Agent
+
+- Claude Code / Desktop：`/plugin marketplace add https://github.com/chichengyu/ai-developer`，再执行 `/plugin install ai-developer-skill-plugin@ai-developer`
+- Cursor：在插件市场添加 `https://github.com/chichengyu/ai-developer`，搜索并安装 `ai-developer-skill-plugin`
+- OpenCode：按 [.opencode/INSTALL.md](../../.opencode/INSTALL.md) 安装
+- 其他支持 `SKILL.md` 的 Agent：把 `skills/skills/*` 复制到对应 skills 目录并重启
 
 ## 校验
 

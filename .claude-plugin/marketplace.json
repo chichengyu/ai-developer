@@ -1,0 +1,13 @@
+{
+  "name": "ai-developer",
+  "displayName": "AI Developer",
+  "plugins": [
+    {
+      "name": "ai-developer-skill-plugin",
+      "source": "./plugin/ai-developer-skill-plugin",
+      "description": "Bundles nine AI developer skills into one installable plugin.",
+      "version": "1.0.0",
+      "author": "ai-developer maintainers"
+    }
+  ]
+}

@@ -44,8 +44,12 @@
 
 ```
 ai-developer/
+├── .agents/plugins/marketplace.json  # Codex marketplace
+├── .claude-plugin/marketplace.json   # Claude marketplace
+├── .cursor-plugin/marketplace.json   # Cursor marketplace
+├── .opencode/INSTALL.md              # OpenCode 安装说明
 ├── README.md            # 本文件
-├── plugin/              # Codex 插件
+├── plugin/              # 插件包（跨桌面 Agent）
 │   └── ai-developer-skill-plugin/
 │       ├── .codex-plugin/plugin.json
 │       ├── README.md
@@ -118,7 +122,7 @@ Java 项目研发现控契约：最小改动、环境物理隔离、SQL 回滚�
 <a id="插件ai-developer-skill-plugin"></a>
 ## 插件：ai-developer-skill-plugin
 
-插件把全部 9 个技能打包为一个可整体安装的 Codex 插件，适合直接分发或部署：
+插件把全部 9 个技能打包为一个可整体安装的跨桌面 Agent 插件，适合直接分发或部署：
 
 - 插件目录：[plugin/ai-developer-skill-plugin/](./plugin/ai-developer-skill-plugin)
 - 插件清单：[plugin/ai-developer-skill-plugin/.codex-plugin/plugin.json](./plugin/ai-developer-skill-plugin/.codex-plugin/plugin.json)
@@ -126,6 +130,13 @@ Java 项目研发现控契约：最小改动、环境物理隔离、SQL 回滚�
 - 技能副本：[plugin/ai-developer-skill-plugin/skills/](./plugin/ai-developer-skill-plugin/skills)
 
 安装：
+
+```bash
+codex plugin marketplace add https://github.com/chichengyu/ai-developer.git
+codex plugin add ai-developer-skill-plugin@ai-developer
+```
+
+本地开发调试可改用：
 
 ```bash
 codex plugin install ./plugin/ai-developer-skill-plugin
@@ -137,7 +148,19 @@ codex plugin install ./plugin/ai-developer-skill-plugin
 python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plugin/ai-developer-skill-plugin
 ```
 
-当前插件未生成 `marketplace.json`；如需接入 Codex 个人市场，可使用 plugin-creator 的 `--with-marketplace` 生成市场条目。
+仓库已生成 `.agents/plugins/marketplace.json`，`codex plugin add` 使用的市场名为 `ai-developer`。
+
+### 跨桌面 Agent 安装
+
+技能本体是标准的 `SKILL.md` 目录，可复制到任何支持 Agent Skills 的桌面端；仓库同时提供 Codex、Claude、Cursor 三个 marketplace 入口。
+
+| Agent | 安装方式 |
+| --- | --- |
+| Codex 桌面端 / CLI | `codex plugin marketplace add https://github.com/chichengyu/ai-developer.git`，再执行 `codex plugin add ai-developer-skill-plugin@ai-developer` |
+| Claude Code / Desktop | `/plugin marketplace add https://github.com/chichengyu/ai-developer`，再执行 `/plugin install ai-developer-skill-plugin@ai-developer` |
+| Cursor | 在插件市场添加 `https://github.com/chichengyu/ai-developer`，搜索并安装 `ai-developer-skill-plugin` |
+| OpenCode | 按 [.opencode/INSTALL.md](./.opencode/INSTALL.md) 安装，或让 OpenCode 执行该文件的步骤 |
+| 其他桌面 Agent | 克隆仓库后，把 `skills/skills/*` 复制到该 Agent 的 skills 目录并重启 |
 
 <a id="刷新插件副本"></a>
 ## 刷新插件副本
