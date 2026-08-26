@@ -142,6 +142,26 @@ codex plugin add ai-developer-skill-plugin@ai-developer
 codex plugin install ./plugin/ai-developer-skill-plugin
 ```
 
+### 通用安装（推荐）
+
+任何桌面 Agent 都可以用同一种方式：克隆仓库后运行通用安装器，脚本会自动把 9 个技能复制到已检测到的 Agent skills 目录。
+
+```bash
+git clone https://github.com/chichengyu/ai-developer.git
+python3 ai-developer/scripts/install_skills.py
+```
+
+脚本默认自动检测本机已安装的桌面 Agent；`--dry-run` 可先查看安装计划。
+
+也可以安装到所有已知 Agent，或指定任意 Agent 的 skills 目录：
+
+```bash
+python3 ai-developer/scripts/install_skills.py --all
+python3 ai-developer/scripts/install_skills.py --dest <你的Agent skills目录>
+```
+
+没有 Python 环境时，直接把 `skills/skills/*` 复制到目标 Agent 的 skills 目录即可。
+
 校验：
 
 ```bash
@@ -150,7 +170,7 @@ python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plug
 
 仓库已生成 `.agents/plugins/marketplace.json`，`codex plugin add` 使用的市场名为 `ai-developer`。
 
-### 跨桌面 Agent 安装
+### 各桌面 Agent 专属方式
 
 技能本体是标准的 `SKILL.md` 目录，可复制到任何支持 Agent Skills 的桌面端；仓库同时提供 Codex、Claude、Cursor 三个 marketplace 入口。
 

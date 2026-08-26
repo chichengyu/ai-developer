@@ -82,6 +82,16 @@ codex plugin add ai-developer-skill-plugin@ai-developer
 codex plugin install ./plugin/ai-developer-skill-plugin
 ```
 
+### 通用安装（所有桌面 Agent）
+
+克隆仓库后运行通用安装器，可自动安装到已检测到的 Codex、Claude、OpenCode，或指定任意 Agent 的 skills 目录：
+
+```bash
+git clone https://github.com/chichengyu/ai-developer.git
+python3 ai-developer/scripts/install_skills.py --all
+python3 ai-developer/scripts/install_skills.py --dest <你的Agent skills目录>
+```
+
 ### 其他桌面 Agent
 
 - Claude Code / Desktop：`/plugin marketplace add https://github.com/chichengyu/ai-developer`，再执行 `/plugin install ai-developer-skill-plugin@ai-developer`
