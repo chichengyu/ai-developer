@@ -1,4 +1,4 @@
-# AI Developer Skill Pack 插件
+# AI Developer Skill Plugin 插件
 
 <p align="center">
   <img src="https://img.shields.io/badge/Codex%20Plugin-v1.0.0-blueviolet" alt="Codex Plugin" />
@@ -6,12 +6,12 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
 </p>
 
-一个 Codex 个人插件，把仓库内的 9 个技能打包为单一可安装单元。插件目录为 `plugin/ai-developer-skill-pack/`，并在 `./skills/` 下保存全部技能的独立副本，可脱离源技能树单独打包、分发和安装。
+一个 Codex 个人插件，把仓库内的 9 个技能打包为单一可安装单元。插件目录为 `plugin/ai-developer-skill-plugin/`，并在 `./skills/` 下保存全部技能的独立副本，可脱离源技能树单独打包、分发和安装。
 
 ## 目录结构
 
 ```
-plugin/ai-developer-skill-pack/
+plugin/ai-developer-skill-plugin/
 ├── .codex-plugin/
 │   └── plugin.json        # Codex 插件清单
 ├── README.md              # 本文件
@@ -72,7 +72,7 @@ plugin/ai-developer-skill-pack/
 插件为本地插件，当前未生成 `marketplace.json`，可直接让 Codex 读取插件清单：
 
 ```bash
-codex plugin install ./plugin/ai-developer-skill-pack
+codex plugin install ./plugin/ai-developer-skill-plugin
 ```
 
 如需生成个人市场条目，可用 plugin-creator 脚手架重跑并加上 `--with-marketplace`。
@@ -80,12 +80,12 @@ codex plugin install ./plugin/ai-developer-skill-pack
 ## 校验
 
 ```bash
-python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plugin/ai-developer-skill-pack
+python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plugin/ai-developer-skill-plugin
 ```
 
 ## 与源技能的关系
 
-`plugin/ai-developer-skill-pack/skills/` 下的 9 个技能目录是 [`skills/`](../../skills/skills) 原始目录的独立副本，用于保证插件可以独立安装、版本化和分发。插件副本与源技能互不影响；源技能更新后，需要重新同步副本：
+`plugin/ai-developer-skill-plugin/skills/` 下的 9 个技能目录是 [`skills/`](../../skills/skills) 原始目录的独立副本，用于保证插件可以独立安装、版本化和分发。插件副本与源技能互不影响；源技能更新后，需要重新同步副本：
 
 ```powershell
 $src = "../../skills/skills"; $dst = "./skills";
