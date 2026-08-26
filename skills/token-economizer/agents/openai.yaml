@@ -1,6 +1,6 @@
 interface:
   display_name: "Token 精约器 v3"
-  short_description: "通用 Token 精约与响应压缩引擎，自动强制启用极简输出模式，最大化减少 Token 消耗。支持 Java 特化压缩、自检门禁、跨技能叠加集成"
+  short_description: "通用 Token 精约与响应压缩引擎，自动强制启用极简输出模式，最大化减少 Token 消耗。支持 Java 特化压缩、自检门禁与渐进展开"
   default_prompt: "自动加载 Token 精约器规则（v3）：以最高压缩比执行本次任务，Java 特化压缩已就绪"
 
   # 触发条件 — 以下任一项匹配即自动激活本契约
@@ -25,11 +25,6 @@ interface:
       architecture: 3               # 架构建议 3 行
       documentation: 8              # 文档生成 8 行
       teaching: 10                  # 教学解释 10 行
-
-  # 集成兄弟技能
-  skill_integration:
-    - java-mysql-query: "输出端压缩，不影响数据库查询逻辑"
-    - java-superpowers-contract: "输出端压缩，审计块除外"
 
   # Java 特化模式
   java_compression:
@@ -65,6 +60,3 @@ interface:
     - task: "架构建议"
       input: "能否用缓存优化性能？"
       output: "建议: Service → @Cacheable → Redis\n+ 降低 DB 60-80%\n! 处理穿透/雪崩/失效"
-    - task: "多技能场景"
-      scenario: "与 java-mysql-query 同加载"
-      output: "执行 `database_query --analyze-table user` → 输出只保留表格结论和压缩率报告"
