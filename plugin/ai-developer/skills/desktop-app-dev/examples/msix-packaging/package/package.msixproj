@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX Packaging Project (Visual Studio).
+  This XML drives `MSBuild /p:GenerateAppxPackageOnBuild=true` and
+  produces a signed .msix from the WPF project above.
+
+  Open in Visual Studio (right-click -> "Set as startup project") for
+  full designer support; from the CLI, run:
+      msbuild package.msixproj /restore /p:GenerateAppxPackageOnBuild=true
+-->
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <ProjectGuid>{B5D2B8F0-3C9E-4D11-9B5E-000000000001}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <AppxPackageSigningEnabled>true</AppxPackageSigningEnabled>
+    <PackageCertificateThumbprint></PackageCertificateThumbprint>
+    <GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild>
+    <AppxBundle>Never</AppxBundle>
+    <AppxBundlePlatforms>x64</AppxBundlePlatforms>
+    <PackageIdentityPublisher>CN=YourPublisher</PackageIdentityPublisher>
+    <AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
+    <AppxAutoIncrementPackageRevision>False</AppxAutoIncrementPackageRevision>
+    <AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
+    <GenerateTestArtifacts>True</GenerateTestArtifacts>
+    <AppxGenerateProjectPriFile>False</AppxGenerateProjectPriFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <AppxManifest Include="Package.appxmanifest">
+      <SubType>Designer</SubType>
+    </AppxManifest>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\app\MsixSample.csproj" />
+  </ItemGroup>
+  <Import Project="$(WapProjPath)\Microsoft.DesktopBridge.AppXPackage.Project.props" Condition="Exists('$(WapProjPath)\Microsoft.DesktopBridge.AppXPackage.Project.props')" />
+  <Import Project="$(WapProjPath)\Microsoft.DesktopBridge.AppXPackage.Project.targets" Condition="Exists('$(WapProjPath)\Microsoft.DesktopBridge.AppXPackage.Project.targets')" />
+</Project>

@@ -1,0 +1,89 @@
+{
+  "toolchains": {
+    "python": {
+      "name": "Python 3.12",
+      "check": ["python", "--version"],
+      "winget": "Python.Python.3.12",
+      "packages": ["PyInstaller"]
+    },
+    "dotnet": {
+      "name": ".NET SDK 8",
+      "check": ["dotnet", "--version"],
+      "winget": "Microsoft.DotNet.SDK.8"
+    },
+    "rust": {
+      "name": "Rust toolchain",
+      "check": ["cargo", "--version"],
+      "winget": "Rustlang.Rustup",
+      "notes": "Tauri also needs MSVC Build Tools and Node.js."
+    },
+    "node": {
+      "name": "Node.js LTS",
+      "check": ["node", "--version"],
+      "winget": "OpenJS.NodeJS.LTS"
+    },
+    "go": {
+      "name": "Go toolchain",
+      "check": ["go", "version"],
+      "winget": "GoLang.Go"
+    },
+    "java": {
+      "name": "Java 17 JDK",
+      "check": ["java", "-version"],
+      "winget": "EclipseAdoptium.Temurin.17.JDK"
+    },
+    "flutter": {
+      "name": "Flutter SDK",
+      "check": ["flutter", "--version"],
+      "winget": "Google.Flutter",
+      "notes": "Flutter also needs Android tooling for mobile; desktop needs only the SDK."
+    },
+    "cpp": {
+      "name": "MSVC Build Tools",
+      "check": ["cl"],
+      "winget": "Microsoft.VisualStudio.2022.BuildTools",
+      "notes": "Run from a Developer Command Prompt after install; Qt also needs the Qt toolchain."
+    },
+    "swift": {
+      "name": "Swift on Windows",
+      "check": ["swift", "--version"],
+      "winget": "",
+      "notes": "Swift on Windows requires the official Swift installer; there is no winget package."
+    }
+  },
+  "framework_toolchains": {
+    "wpf": ["dotnet"],
+    "winforms": ["dotnet"],
+    "winui3": ["dotnet"],
+    "maui": ["dotnet"],
+    "avalonia": ["dotnet"],
+    "tkinter": ["python"],
+    "pyside6": ["python"],
+    "py_gtk": ["python"],
+    "tauri": ["rust", "node"],
+    "electron": ["node"],
+    "neutralino": ["node"],
+    "qt6": ["cpp"],
+    "win32_mfc": ["cpp"],
+    "wails": ["go"],
+    "fyne": ["go"],
+    "gio": ["go"],
+    "walk": ["go"],
+    "compose_multiplatform": ["java"],
+    "tornadofx": ["java"],
+    "javafx": ["java"],
+    "flutter": ["flutter"],
+    "slint": ["rust"],
+    "egui": ["rust"],
+    "swiftui": ["swift"],
+    "python": ["python"],
+    "dotnet": ["dotnet"],
+    "csharp": ["dotnet"],
+    "rust": ["rust"],
+    "node": ["node"],
+    "go": ["go"],
+    "java": ["java"],
+    "cpp": ["cpp"],
+    "swift": ["swift"]
+  }
+}

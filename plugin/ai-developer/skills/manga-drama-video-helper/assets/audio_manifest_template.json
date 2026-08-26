@@ -1,0 +1,37 @@
+{
+  "project_slug": null,
+  "series_slug": null,
+  "episode_number": null,
+  "continuity_version": 1,
+  "voice": [
+    {
+      "line_id": "S1_01",
+      "speaker": "林暮",
+      "text": "把剑放下。",
+      "text_en": "Put the sword down.",
+      "file": "audio/voice/S1_01.mp3",
+      "start_at_s": 0.0,
+      "emotion": "克制",
+      "emotion_layers": ["克制", "隐忍"],
+      "voice_id": null
+    }
+  ],
+  "bgm": [
+    {
+      "scene_id": "s1",
+      "file": "audio/bgm/s1.mp3",
+      "start_at_s": 0.0,
+      "volume": 0.35,
+      "engine": null
+    }
+  ],
+  "sfx": [
+    {
+      "name": "剑鸣",
+      "file": "audio/sfx/s1_sword.mp3",
+      "enter_at_s": 2.5,
+      "volume": 0.8,
+      "engine": null
+    }
+  ]
+}

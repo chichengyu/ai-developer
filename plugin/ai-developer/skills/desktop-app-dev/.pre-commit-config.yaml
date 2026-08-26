@@ -1,0 +1,56 @@
+# Pre-commit hooks for the desktop-app-dev skill.
+#
+# Install:
+#     pip install pre-commit ruff mypy
+#     pre-commit install
+#
+# The hooks run:
+#   1. trailing-whitespace fixer
+#   2. end-of-file fixer
+#   3. ruff check + ruff format (Python)
+#   4. mypy (Python; enforced, fails on type errors)
+#   5. PowerShell parse via System.Management.Automation.Language.Parser
+#   6. JSON / TOML / XML validity
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+        exclude: ^tests/fixtures/.*\.json$   # sample_config.json is illustrative; not a strict schema
+      - id: check-toml
+      - id: check-xml
+        exclude: ^tests/fixtures/.*\.xml$    # AppxManifest uses xmlns= which some hooks mis-parse
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        files: ^scripts/.*\.py$
+        # Many scripts use ctypes bindings; mypy is enforced by CI and
+        # this hook fails the commit on type errors.
+        args: ["--no-error-summary", "--follow-imports=silent"]
+        additional_dependencies: ["types-requests"]
+
+  - repo: local
+    hooks:
+      - id: powershell-parse
+        name: PowerShell parse (all .ps1)
+        # Cross-platform: requires pwsh on PATH. On Windows this is
+        # Windows PowerShell or PowerShell 7; on macOS / Linux install
+        # via brew / apt.
+        language: system
+        files: '\.ps1$'
+        entry: pwsh -NoProfile -Command
+        args: ['"$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $_).Path, [ref]$null, [ref]$errors) | Out-Null; if ($errors) { $errors | Out-String; exit 1 } else { exit 0 }"']

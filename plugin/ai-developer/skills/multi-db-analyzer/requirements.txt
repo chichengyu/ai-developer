@@ -1,0 +1,15 @@
+pymysql>=1.1.0
+# Optional DB drivers:
+# pip install psycopg2-binary  # PostgreSQL
+# pip install pymssql          # SQL Server
+# pip install oracledb         # Oracle
+# pip install redis            # Redis
+# pip install elasticsearch    # Elasticsearch
+# pip install pymongo          # MongoDB
+# pip install influxdb-client  # InfluxDB
+# pip install taos             # TDengine
+# pip install qdrant-client    # Qdrant VectorDB
+# sqlite3 is built-in
+# pip install pymilvus         # Milvus VectorDB
+# pip install dolphindb        # DolphinDB TimeSeries
+# pip install cryptography     # Credential encryption

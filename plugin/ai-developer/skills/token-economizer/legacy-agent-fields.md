@@ -1,0 +1,65 @@
+# Legacy agent manifest fields
+The original `agents/openai.yaml` for this skill contained extra fields that the current Codex plugin-creator schema does not accept (`trigger`, `response_format`, `java_compression`, `quality_gate`, `examples`). They are preserved here verbatim so the information stays available inside the bundled skill even after the schema cleanup. The active agent manifest in this directory keeps only the schema-allowed fields.
+## trigger
+```yaml
+trigger:
+  event_types:
+    - pre_response     # 每次响应前自动注入
+  conditions:
+    - always           # 无条件、全场景自动加载
+```
+## response_format
+```yaml
+response_format:
+  compress_narrative: true        # 叙述层强制压缩
+  priority_rules:
+    - order: 1                    # 最高优先级——高于所有其他技能
+      principle: "所有技能输出端叠加压缩，不干扰技能逻辑层"
+  narrative_budget:
+    single_file_edit: 0           # 单文件修改零叙述
+    multi_file_edit: 1            # 多文件修改 1 行概括
+    bug_fix: 1                    # Bug 修复 1 行
+    code_review: 3                # 代码审查 3 行
+    analysis_report: 5            # 分析报告 5 行
+    architecture: 3               # 架构建议 3 行
+    documentation: 8              # 文档生成 8 行
+    teaching: 10                  # 教学解释 10 行
+```
+## java_compression
+```yaml
+java_compression:
+  enabled: true
+  annotation_shortform: true      # @Transactional 不解释
+  method_signature_compact: true  # Page<UserDTO> searchUsers(Pageable, String)
+  exception_abbrev: true          # IAE/ISE/NPE
+  orm_reference: "<mapper>#<selectId> | <Entity>Repository::<method>"
+```
+## quality_gate
+```yaml
+quality_gate:
+  self_check: [
+    "no_fluff: R1 zero-fluff check",
+    "budget_check: R7 narrative line count",
+    "format_optimize: R12 table/single-line check",
+    "context_prune: R9 deduplication check"
+  ]
+  compression_report:
+    mode: "auto"                   # 压缩率 >90% 省略报告
+    format: "[压缩: XX → YY (ZZ%)]"
+```
+## examples
+```yaml
+examples:
+  - task: "单文件修改"
+    input: "修复 UserController.java 第42行 NPE"
+    output: "UserController.java:42 + if (email == null) return;"
+  - task: "代码审查"
+    input: "审查 OrderController.java"
+    output: "[1] OrderController.java:32 @Autowired → 构造器注入\n[2] OrderController.java:67 缺 @Transactional"
+  - task: "Java 注解引用"
+    input: "给 login 方法加事务"
+    output: "UserService.login() + @Transactional"
+  - task: "架构建议"
+    input: "能否用缓存优化性能？"
+    output: "建议: Service → @Cacheable → Redis\n+ 降低 DB 60-80%\n! 处理穿透/雪崩/失效"
+```

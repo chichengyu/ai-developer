@@ -1,0 +1,47 @@
+{
+  "project_slug": null,
+  "series_slug": null,
+  "episode_number": null,
+  "continuity_version": 1,
+  "aspect_ratio": "9:16",
+  "resolution": "1080x1920",
+  "shots": [
+    {
+      "shot_id": "SH1.1",
+      "image": "assets/scenes/SH1.1.png",
+      "duration_sec": 4,
+      "camera_move": "push-in",
+      "transition_in": "fade-in",
+      "transition_out": "cut",
+      "seed": null,
+      "engine": null,
+      "prompt": null
+    }
+  ],
+  "characters": {
+    "lin-mu": {
+      "name": "林暮",
+      "front": null,
+      "three_quarter": null,
+      "expression": null,
+      "action": null,
+      "seed": null
+    }
+  },
+  "scenes": {
+    "s1": {
+      "name": "山门石阶",
+      "wide": null,
+      "detail": null,
+      "style": null,
+      "seed": null
+    }
+  },
+  "motion": {
+    "SH1.1": {
+      "camera": "assets/motion/SH1.1_camera.json",
+      "fight": null
+    }
+  },
+  "subs": null
+}

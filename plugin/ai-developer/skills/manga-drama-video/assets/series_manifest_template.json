@@ -1,0 +1,43 @@
+{
+  "series_slug": "zhang-san-legend",
+  "series_title": "张三传奇",
+  "character_style": "写实动漫",
+  "style_seed": 20260801,
+  "continuity_version": 1,
+  "characters": [
+    {
+      "character_id": "zhang-san",
+      "name": "张三",
+      "role": "protagonist",
+      "canonical_refs": [
+        "refs/zhang-san_front.png",
+        "refs/zhang-san_three_quarter.png",
+        "refs/zhang-san_side.png",
+        "refs/zhang-san_expressions.png"
+      ],
+      "seed": 1001,
+      "prompt_fragment": "同一人物设定，同一张脸，同一发型，同一服装，同一配色，同一体型，同一五官比例，角色一致性，人物设定统一，连续剧情人物",
+      "voice_id": "pending",
+      "first_episode": "EP01",
+      "last_episode": "EP01",
+      "locked": true
+    }
+  ],
+  "locations": [
+    {
+      "scene_id": "zhang-home",
+      "name": "张三老宅",
+      "canonical_refs": ["refs/zhang-home_wide.png"],
+      "seed": 2001,
+      "prompt_fragment": "同一场景设定，同一建筑结构，同一配色，同一材质，同一光照风格，场景一致性",
+      "first_episode": "EP01",
+      "locked": true
+    }
+  ],
+  "palette": [],
+  "rules": [
+    "不得跨集更换已锁定角色的脸型、五官比例、发型、服装配色。",
+    "新一集必须加载上一集已批准的 canonical refs 与 seed。",
+    "任何角色外观变更必须先在 character-bible.md 中说明，经用户批准后才可生成新参考图。"
+  ]
+}

@@ -1,0 +1,52 @@
+[project]
+name = "desktop-app-dev"
+version = "1.0.0"
+description = "Consultative Codex skill for shipping native cross-platform desktop GUI applications."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["codex", "skill", "desktop", "windows", "macos", "linux", "sendinput"]
+authors = [{ name = "desktop-app-dev contributors" }]
+# No runtime deps -- this is a skill, not a library.
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "build",
+    "dist",
+    "**/__pycache__",
+    ".venv",
+]
+
+[tool.ruff.lint]
+# Defaults plus a couple of stricter rules.
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # line-too-long -- handled by formatter
+    "B008",  # function-call-in-default-argument -- used in dataclass defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The koffi/Ctypes worker branch in window_enum_node.ts has dynamic code.
+"scripts/window_enum_node.ts" = ["F401"]
+# sendinput_python.py exposes a flat dict of VK constants; ignore unused if a
+# reader only needs a subset.
+"scripts/sendinput_python.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# Optional mypy config (skill scripts are intentionally untyped; enable per-project).
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true

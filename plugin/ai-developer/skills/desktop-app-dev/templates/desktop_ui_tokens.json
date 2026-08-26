@@ -1,0 +1,86 @@
+{
+  "theme": {
+    "name": "codex-default",
+    "modes": ["light", "dark", "high-contrast"],
+    "semantic": {
+      "success": "#2f9e44",
+      "warning": "#e8590c",
+      "danger": "#e03131",
+      "info": "#1971c2"
+    }
+  },
+  "color": {
+    "light": {
+      "background": "#f7f7f8",
+      "surface": "#ffffff",
+      "surface_alt": "#f1f1f3",
+      "text": "#1f1f23",
+      "text_muted": "#5c5c66",
+      "border": "#d5d5db",
+      "primary": "#1f6feb",
+      "primary_hover": "#185cbe",
+      "focus": "#1f6feb"
+    },
+    "dark": {
+      "background": "#1b1b1f",
+      "surface": "#232329",
+      "surface_alt": "#2b2b32",
+      "text": "#ececef",
+      "text_muted": "#a6a6b0",
+      "border": "#3b3b44",
+      "primary": "#4c8dff",
+      "primary_hover": "#6fa1ff",
+      "focus": "#4c8dff"
+    },
+    "high-contrast": {
+      "background": "#000000",
+      "surface": "#000000",
+      "surface_alt": "#1a1a1a",
+      "text": "#ffffff",
+      "text_muted": "#ffffff",
+      "border": "#ffffff",
+      "primary": "#ffff00",
+      "primary_hover": "#ffff66",
+      "focus": "#ffffff"
+    }
+  },
+  "typography": {
+    "font_family": "Segoe UI",
+    "sizes": {
+      "caption": 11,
+      "body": 13,
+      "label": 13,
+      "heading_small": 15,
+      "heading": 18,
+      "page_title": 22
+    },
+    "weights": {
+      "regular": 400,
+      "medium": 600,
+      "bold": 700
+    }
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24
+  },
+  "radii": {
+    "control": 4,
+    "card": 8
+  },
+  "dimensions": {
+    "toolbar_height": 36,
+    "row_height": 32,
+    "statusbar_height": 24,
+    "min_window_width": 800,
+    "min_window_height": 600
+  },
+  "motion": {
+    "fast_ms": 100,
+    "normal_ms": 180,
+    "slow_ms": 280
+  }
+}

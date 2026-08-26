@@ -1,0 +1,1336 @@
+"""Deep page parsing for the media acquisition pipeline.
+
+Extracts page metadata, embedded JSON state (JSON-LD, Next.js, Nuxt,
+application/json), API endpoints from scripts/forms/preloads, media URLs
+inside embedded JSON, pagination fields, and API-like data fields.
+Standard-library only; Playwright stays optional in browser_session.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any
+
+from captcha_solver import CaptchaChallenge, detect_captchas
+from login_detector import LoginDetection, detect_login
+from media_parser import MediaExtraction, extract_media_urls, normalize_url
+
+_MAX_SCRIPT_BYTES = 8 * 1024 * 1024
+_MAX_JSON_DEPTH = 40
+_MAX_ENDPOINTS = 300
+_MAX_API_FIELDS = 300
+_MAX_LINKS = 2000
+_MAX_PAGINATION_PER_KEY = 20
+
+
+@dataclass
+class PageMetadata:
+    title: str | None = None
+    description: str | None = None
+    keywords: str | None = None
+    author: str | None = None
+    robots: str | None = None
+    generator: str | None = None
+    canonical: str | None = None
+    base_url: str | None = None
+    og_title: str | None = None
+    og_description: str | None = None
+    og_image: str | None = None
+    og_url: str | None = None
+    og_type: str | None = None
+    og_site_name: str | None = None
+    twitter_title: str | None = None
+    twitter_description: str | None = None
+    twitter_image: str | None = None
+    language: str | None = None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "title": self.title,
+            "description": self.description,
+            "keywords": self.keywords,
+            "author": self.author,
+            "robots": self.robots,
+            "generator": self.generator,
+            "canonical": self.canonical,
+            "base_url": self.base_url,
+            "og_title": self.og_title,
+            "og_description": self.og_description,
+            "og_image": self.og_image,
+            "og_url": self.og_url,
+            "og_type": self.og_type,
+            "og_site_name": self.og_site_name,
+            "twitter_title": self.twitter_title,
+            "twitter_description": self.twitter_description,
+            "twitter_image": self.twitter_image,
+            "language": self.language,
+        }
+
+
+@dataclass
+class EmbeddedJson:
+    kind: str
+    name: str | None
+    data: Any
+    size_bytes: int
+    parse_error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "name": self.name,
+            "size_bytes": self.size_bytes,
+            "data": self.data if self.parse_error is None else None,
+            "parse_error": self.parse_error,
+        }
+
+
+@dataclass
+class ApiEndpoint:
+    method: str
+    url: str
+    source: str
+    body: Any = None
+    params: dict[str, Any] | None = None
+    content_type: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "url": self.url,
+            "source": self.source,
+            "body": self.body,
+            "params": self.params,
+            "content_type": self.content_type,
+        }
+
+
+@dataclass
+class ApiField:
+    path: str
+    key: str
+    value: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"path": self.path, "key": self.key, "value": self.value}
+
+
+@dataclass
+class FormField:
+    action: str
+    method: str
+    name: str
+    value: str = ""
+    type: str = "text"
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "action": self.action,
+            "method": self.method,
+            "name": self.name,
+            "value": self.value,
+            "type": self.type,
+        }
+
+
+@dataclass
+class PageDataAnalysis:
+    url: str | None = None
+    metadata: PageMetadata = field(default_factory=PageMetadata)
+    media: MediaExtraction = field(default_factory=MediaExtraction)
+    embedded_json: list[EmbeddedJson] = field(default_factory=list)
+    json_media: MediaExtraction = field(default_factory=MediaExtraction)
+    json_api_fields: list[ApiField] = field(default_factory=list)
+    form_fields: list[FormField] = field(default_factory=list)
+    api_endpoints: list[ApiEndpoint] = field(default_factory=list)
+    streams: list[dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
+    pagination: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    captchas: list[CaptchaChallenge] = field(default_factory=list)
+    links: list[str] = field(default_factory=list)
+    assets: dict[str, list[str]] = field(default_factory=dict)
+    login: LoginDetection | None = None
+
+    def to_dict(self, include_data: bool = True) -> dict[str, Any]:
+        return {
+            "url": self.url,
+            "metadata": self.metadata.to_dict(),
+            "media": _media_lists(self.media),
+            "assets": self.assets,
+            "links": list(self.links[:_MAX_LINKS]),
+            "embedded_json": [
+                item.to_dict() if include_data else _json_block_summary(item)
+                for item in self.embedded_json
+            ],
+            "json_media": _media_lists(self.json_media),
+            "json_api_fields": [item.to_dict() for item in self.json_api_fields],
+            "form_fields": [item.to_dict() for item in self.form_fields[:_MAX_API_FIELDS]],
+            "api_endpoints": [item.to_dict() for item in self.api_endpoints],
+            "streams": self.streams,
+            "events": self.events,
+            "pagination": self.pagination,
+            "captchas": [item.to_dict() for item in self.captchas],
+            "login": self.login.to_dict() if self.login else None,
+        }
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "url": self.url,
+            "metadata": self.metadata.to_dict(),
+            "media": _media_counts(self.media),
+            "assets": {key: len(value) for key, value in self.assets.items()},
+            "links": list(self.links[:_MAX_LINKS]),
+            "json_media": _media_counts(self.json_media),
+            "embedded_json": [_json_block_summary(item) for item in self.embedded_json],
+            "api_endpoints": [item.to_dict() for item in self.api_endpoints[:_MAX_ENDPOINTS]],
+            "json_api_fields": [item.to_dict() for item in self.json_api_fields[:_MAX_API_FIELDS]],
+            "form_fields": [item.to_dict() for item in self.form_fields[:_MAX_API_FIELDS]],
+            "streams": self.streams[:_MAX_ENDPOINTS],
+            "events": self.events[:_MAX_ENDPOINTS],
+            "pagination": {
+                key: values[:_MAX_PAGINATION_PER_KEY] for key, values in self.pagination.items()
+            },
+            "captchas": [item.to_dict() for item in self.captchas],
+            "login": self.login.to_dict() if self.login else None,
+        }
+
+
+class _PageHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.html_lang: str | None = None
+        self.base_href: str | None = None
+        self.title_parts: list[str] = []
+        self.meta: dict[str, str] = {}
+        self.links: list[tuple[str, str]] = []
+        self.forms: list[tuple[str, str]] = []
+        self.form_fields: list[FormField] = []
+        self.dom_events: list[dict[str, Any]] = []
+        self._form_stack: list[dict[str, str]] = []
+        self.script_srcs: list[str] = []
+        self.script_blocks: list[tuple[str | None, str | None, str]] = []
+        self._script_id: str | None = None
+        self._script_type: str | None = None
+        self._script_text: list[str] = []
+        self._in_script = False
+        self._in_title = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {name.lower(): value or "" for name, value in attrs}
+        tag = tag.lower()
+        selector = ""
+        if attr_map.get("id"):
+            selector = f"#{attr_map['id']}"
+        elif attr_map.get("name"):
+            selector = f"[name={attr_map['name']!r}]"
+        elif attr_map.get("class"):
+            selector = "." + attr_map["class"].split()[0]
+        else:
+            selector = tag
+        for key, value in attr_map.items():
+            if key.startswith("on") and len(key) > 2 and value:
+                self.dom_events.append(
+                    {
+                        "event": key[2:],
+                        "target": selector,
+                        "handler": value[:300],
+                        "source": "html",
+                    }
+                )
+        if tag == "html":
+            self.html_lang = attr_map.get("lang") or None
+        elif tag == "base":
+            href = attr_map.get("href", "").strip()
+            if href:
+                self.base_href = href
+        elif tag == "meta":
+            key = (attr_map.get("name") or attr_map.get("property") or "").strip().lower()
+            content = attr_map.get("content", "").strip()
+            if key and content:
+                self.meta[key] = content
+        elif tag == "link":
+            rel = (attr_map.get("rel") or "").strip().lower()
+            href = (attr_map.get("href") or "").strip()
+            if rel and href:
+                self.links.append((rel, href))
+        elif tag == "form":
+            method = (attr_map.get("method") or "GET").strip().upper() or "GET"
+            action = (attr_map.get("action") or "").strip()
+            if action:
+                self.forms.append((method, action))
+                self._form_stack.append({"method": method, "action": action})
+        elif tag in {"input", "select", "textarea"} and self._form_stack:
+            form = self._form_stack[-1]
+            name = attr_map.get("name") or attr_map.get("id") or ""
+            if name:
+                field_type = attr_map.get("type") or tag
+                value = attr_map.get("value") or ""
+                self.form_fields.append(
+                    FormField(
+                        action=form["action"],
+                        method=form["method"],
+                        name=name,
+                        value=value,
+                        type=field_type,
+                    )
+                )
+        elif tag == "script":
+            src = (attr_map.get("src") or "").strip()
+            if src:
+                self.script_srcs.append(src)
+            self._script_id = attr_map.get("id") or None
+            self._script_type = attr_map.get("type") or None
+            self._script_text = []
+            self._in_script = True
+        elif tag == "title":
+            self._in_title = True
+
+    def handle_data(self, data: str) -> None:
+        if self._in_script:
+            self._script_text.append(data)
+        elif self._in_title:
+            self.title_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "script" and self._in_script:
+            text = "".join(self._script_text)
+            self.script_blocks.append((self._script_id, self._script_type, text))
+            self._in_script = False
+            self._script_id = None
+            self._script_type = None
+        elif tag == "form" and self._form_stack:
+            self._form_stack.pop()
+        elif tag == "title":
+            self._in_title = False
+
+
+_GLOBAL_STATE_PATTERNS = (
+    (r"(?:window\.)?__NEXT_DATA__\s*=\s*", "next-data", "__NEXT_DATA__"),
+    (r"(?:window\.)?__NUXT__\s*=\s*", "nuxt-data", "__NUXT__"),
+    (r"(?:window\.)?__INITIAL_STATE__\s*=\s*", "global-state", "__INITIAL_STATE__"),
+    (r"(?:window\.)?__PRELOADED_STATE__\s*=\s*", "global-state", "__PRELOADED_STATE__"),
+    (r"(?:window\.)?__APOLLO_STATE__\s*=\s*", "global-state", "__APOLLO_STATE__"),
+    (r"(?:window\.)?__APP_DATA__\s*=\s*", "global-state", "__APP_DATA__"),
+    (r"(?:window\.)?__INITIAL_DATA__\s*=\s*", "global-state", "__INITIAL_DATA__"),
+)
+
+_FETCH_RE = re.compile(
+    r"\bfetch\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)"
+    r"(?P<opts>\s*,\s*(?P<object>\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}))?",
+    re.IGNORECASE | re.DOTALL,
+)
+_AXIOS_RE = re.compile(
+    r"\baxios\s*\.\s*(?P<method>get|post|put|patch|delete|head|options|request)"
+    r"\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)"
+    r"(?P<rest>\s*,\s*(?P<object>\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}))?",
+    re.IGNORECASE | re.DOTALL,
+)
+_XHR_RE = re.compile(
+    r"\.open\s*\(\s*(?P<q1>[\"'])(?P<method>GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)"
+    r"(?P=q1)\s*,\s*(?P<q2>[\"'`])(?P<url>[^\"'`]+)(?P=q2)",
+    re.IGNORECASE,
+)
+_JQUERY_RE = re.compile(
+    r"\$\s*\.\s*ajax\s*\(\s*\{[^}]*?url\s*:\s*(?P<quote>[\"'`])" r"(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_OBJECT_URL_RE = re.compile(
+    r"\burl\s*:\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_HTTP_RE = re.compile(
+    r"\bhttp\s*\.\s*(?P<method>get|post|put|patch|delete|head|options|request)"
+    r"\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_WEBSOCKET_RE = re.compile(
+    r"new\s+WebSocket\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_EVENTSOURCE_RE = re.compile(
+    r"new\s+EventSource\s*\(\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_WS_SEND_RE = re.compile(
+    r"\.send\s*\(\s*(?P<value>JSON\.stringify\s*\(\s*(\{.*?\})\s*\)"
+    r"|`[^`]*`|\"[^\"]*\"|'[^']*')",
+    re.DOTALL | re.IGNORECASE,
+)
+_EVENT_BIND_RE = re.compile(
+    r"(?:addEventListener|\.on|\.bind|\.delegate|\.live)\s*\(\s*"
+    r"(?P<quote>['\"])(?P<event>[^'\"]+)(?P=quote)",
+    re.IGNORECASE,
+)
+_METHOD_IN_OPTIONS_RE = re.compile(
+    r"method\s*:\s*(?P<quote>[\"'])(?P<method>GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)"
+    r"(?P=quote)",
+    re.IGNORECASE,
+)
+_JQUERY_METHOD_RE = re.compile(
+    r"(?:type|method)\s*:\s*(?P<quote>[\"'])"
+    r"(?P<method>GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)(?P=quote)",
+    re.IGNORECASE,
+)
+_UNDEFINED_RE = re.compile(r"(?<![\w\"'])undefined(?![\w\"'])")
+_FETCH_BODY_RE = re.compile(
+    r"\b(?:body|data)\s*:\s*(?P<value>JSON\.stringify\s*\(\s*(\{.*?\})\s*\)"
+    r"|`[^`]*`|\"[^\"]*\"|'[^']*'|\{.*?\})",
+    re.DOTALL | re.IGNORECASE,
+)
+_PARAMS_RE = re.compile(
+    r"\bparams\s*:\s*(\{.*?\})",
+    re.DOTALL,
+)
+_CONTENT_TYPE_RE = re.compile(
+    r"\b(?:headers\s*:\s*\{[^}]*?)?(?:\"Content-Type\"|Content-Type)\s*:\s*"
+    r"(?P<quote>[\"'])(?P<value>[^\"']+)(?P=quote)",
+    re.IGNORECASE,
+)
+_GRAPHQL_OP_RE = re.compile(
+    r"(?P<op>query|mutation)\s+(?P<name>\w+)\s*(?:\((?P<args>[^)]*)\))?\s*(?P<body>\{.*\})",
+    re.DOTALL | re.IGNORECASE,
+)
+_AXIOS_REQUEST_OBJECT_RE = re.compile(
+    r"\baxios\s*\.\s*request\s*\(\s*\{(?P<config>.*?)\}\s*\)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _loads_json(text: str) -> Any:
+    candidate = re.sub(r";\s*$", "", text.strip()).strip()
+    candidate = _UNDEFINED_RE.sub("null", candidate)
+    return json.loads(candidate)
+
+
+def _block_signature(block: EmbeddedJson) -> tuple[str, str | None, str]:
+    if block.parse_error:
+        return (block.kind, block.name, "parse-error")
+    try:
+        payload = json.dumps(block.data, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        payload = repr(block.data)[:2000]
+    return (block.kind, block.name, payload)
+
+
+def _append_unique(
+    found: list[EmbeddedJson],
+    seen: set[tuple[str, str | None, str]],
+    block: EmbeddedJson,
+) -> None:
+    key = _block_signature(block)
+    if key in seen:
+        return
+    seen.add(key)
+    found.append(block)
+
+
+def _make_json_block(kind: str, name: str | None, text: str) -> EmbeddedJson:
+    size = len(text)
+    if size > _MAX_SCRIPT_BYTES:
+        return EmbeddedJson(
+            kind=kind,
+            name=name,
+            data=None,
+            size_bytes=size,
+            parse_error="script exceeds max size",
+        )
+    try:
+        data = _loads_json(text)
+    except json.JSONDecodeError as exc:
+        return EmbeddedJson(kind=kind, name=name, data=None, size_bytes=size, parse_error=str(exc))
+    return EmbeddedJson(kind=kind, name=name, data=data, size_bytes=size)
+
+
+def _extract_embedded_from_parser(parser: _PageHTMLParser) -> list[EmbeddedJson]:
+    found: list[EmbeddedJson] = []
+    seen: set[tuple[str, str | None, str]] = set()
+    for script_id, script_type, text in parser.script_blocks:
+        text = text.strip()
+        if not text:
+            continue
+        stype = (script_type or "").strip().lower()
+        if stype.startswith("application/ld+json"):
+            block = _make_json_block("json-ld", script_id or None, text)
+            _append_unique(found, seen, block)
+            continue
+        if stype.startswith("application/json"):
+            block = _make_json_block("application-json", script_id or None, text)
+            _append_unique(found, seen, block)
+            continue
+        for pattern, kind, var_name in _GLOBAL_STATE_PATTERNS:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                candidate = text[match.end() :]
+                block = _make_json_block(kind, script_id or var_name, candidate)
+                if block.parse_error is None:
+                    _append_unique(found, seen, block)
+    return found
+
+
+def _effective_base(parser: _PageHTMLParser, base_url: str | None) -> str | None:
+    if parser.base_href:
+        return normalize_url(parser.base_href, base_url)
+    return base_url
+
+
+def _resolve_url(value: str | None, base: str | None) -> str | None:
+    if not value:
+        return None
+    return normalize_url(value, base)
+
+
+def _build_metadata(
+    parser: _PageHTMLParser,
+    base_url: str | None,
+    effective_base: str | None,
+) -> PageMetadata:
+    meta = parser.meta
+    canonical = next(
+        (href for rel, href in parser.links if rel == "canonical"),
+        None,
+    )
+    return PageMetadata(
+        title=" ".join(part.strip() for part in parser.title_parts if part.strip()) or None,
+        description=meta.get("description"),
+        keywords=meta.get("keywords"),
+        author=meta.get("author"),
+        robots=meta.get("robots"),
+        generator=meta.get("generator"),
+        canonical=_resolve_url(canonical, effective_base),
+        base_url=effective_base or base_url,
+        og_title=meta.get("og:title"),
+        og_description=meta.get("og:description"),
+        og_image=_resolve_url(meta.get("og:image"), effective_base),
+        og_url=_resolve_url(meta.get("og:url"), effective_base),
+        og_type=meta.get("og:type"),
+        og_site_name=meta.get("og:site_name"),
+        twitter_title=meta.get("twitter:title"),
+        twitter_description=meta.get("twitter:description"),
+        twitter_image=_resolve_url(meta.get("twitter:image"), effective_base),
+        language=parser.html_lang,
+    )
+
+
+def _looks_like_url(value: str) -> bool:
+    value = value.strip()
+    if value.startswith(("javascript:", "data:", "blob:", "mailto:", "tel:", "about:")):
+        return False
+    return value.startswith(("http://", "https://", "//", "/", "."))
+
+
+def _normalize_endpoint_url(url: str, base: str | None) -> str | None:
+    value = re.sub(r"\$\{([^}]+)\}", r"{\1}", url.strip())
+    if not value or value.startswith("#"):
+        return None
+    return normalize_url(value, base)
+
+
+def _method_from_options(options: str) -> str | None:
+    match = _METHOD_IN_OPTIONS_RE.search(options)
+    return match.group("method").upper() if match else None
+
+
+def _jquery_method(block: str) -> str | None:
+    match = _JQUERY_METHOD_RE.search(block)
+    return match.group("method").upper() if match else None
+
+
+def _parse_js_object(text: str) -> Any:
+    value = text.strip()
+    if not value:
+        return None
+    if value[0] in {"'", '"', "`"} and value[-1] == value[0]:
+        value = value[1:-1].strip()
+    if value.startswith(("{", "[")):
+        normalized = re.sub(
+            r"([{,]\s*)([A-Za-z_$][\w$]*)\s*:",
+            r'\1"\2":',
+            value,
+        )
+        normalized = re.sub(
+            r"(['\"])([^'\"]+)(['\"])\s*:",
+            r'"\2":',
+            normalized,
+        )
+        normalized = normalized.replace("'", '"')
+        normalized = re.sub(r",\s*([}\]])", r"\1", normalized)
+        normalized = re.sub(r"\bundefined\b", "null", normalized)
+        try:
+            return json.loads(normalized)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _extract_body_from_options(options: str) -> Any:
+    if not options:
+        return None
+    match = _FETCH_BODY_RE.search(options)
+    if match is None:
+        return None
+    raw = match.group("value").strip()
+    if raw.startswith("JSON.stringify"):
+        inner = re.search(r"\(\s*(\{.*\})\s*\)\s*$", raw, re.DOTALL)
+        if inner:
+            return _parse_js_object(inner.group(1))
+    return _parse_js_object(raw)
+
+
+def _extract_params_from_options(options: str) -> dict[str, Any] | None:
+    match = _PARAMS_RE.search(options)
+    if match is None:
+        return None
+    parsed = _parse_js_object(match.group(1))
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _extract_content_type(options: str) -> str | None:
+    match = _CONTENT_TYPE_RE.search(options)
+    return match.group("value") if match else None
+
+
+def _axios_body_from_rest(method: str, rest: str) -> Any:
+    stripped = rest.strip()
+    if stripped.startswith(","):
+        candidate = stripped[1:].strip()
+        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+            match = re.match(
+                r"(\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})",
+                candidate,
+                re.DOTALL,
+            )
+            if match:
+                return _parse_js_object(match.group(1))
+    return _extract_body_from_options(rest)
+
+
+def _extract_graphql_operations(script_text: str) -> list[dict[str, Any]]:
+    operations: list[dict[str, Any]] = []
+    for match in _GRAPHQL_OP_RE.finditer(script_text):
+        operation = match.group("op")
+        name = match.group("name")
+        args = match.group("args") or ""
+        body = match.group("body")
+        query = f"{operation} {name}"
+        if args:
+            query += f"({args})"
+        query += f" {body}"
+        variables = {
+            variable_name: None
+            for variable_name in re.findall(r"\$(\w+)", args)
+        }
+        operations.append(
+            {
+                "query": query,
+                "name": name,
+                "variables": variables,
+            }
+        )
+    return operations
+
+
+def _extract_ws_send_payloads(script_text: str) -> list[Any]:
+    payloads: list[Any] = []
+    for match in _WS_SEND_RE.finditer(script_text):
+        raw = match.group("value").strip()
+        if raw.startswith("JSON.stringify"):
+            inner = re.search(r"\(\s*(\{.*?\})\s*\)\s*$", raw, re.DOTALL)
+            payloads.append(_parse_js_object(inner.group(1)) if inner else None)
+        else:
+            payloads.append(_parse_js_object(raw))
+    return [payload for payload in payloads if payload is not None]
+
+
+def _extract_js_events(script_text: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    url_patterns = (
+        _FETCH_RE,
+        _AXIOS_RE,
+        _XHR_RE,
+        _JQUERY_RE,
+        _OBJECT_URL_RE,
+        _HTTP_RE,
+        _WEBSOCKET_RE,
+        _EVENTSOURCE_RE,
+    )
+    for match in _EVENT_BIND_RE.finditer(script_text):
+        window_text = script_text[match.end() : match.end() + 500]
+        urls: list[str] = []
+        for pattern in url_patterns:
+            for url_match in pattern.finditer(window_text):
+                url = str(url_match.group("url"))
+                if url not in urls:
+                    urls.append(url)
+        events.append(
+            {
+                "event": match.group("event"),
+                "handler_urls": urls[:20],
+                "source": "js",
+            }
+        )
+    return events
+
+
+def _add_js_endpoints(
+    script_text: str,
+    base: str | None,
+    add: Callable[[str, str, str], None],
+) -> None:
+    graphql_ops = _extract_graphql_operations(script_text)
+    ws_payloads = _extract_ws_send_payloads(script_text)
+
+    def graphql_body(url: str) -> Any:
+        if "graphql" not in url.lower() or not graphql_ops:
+            return None
+        operation = graphql_ops[0]
+        return {
+            "query": operation["query"],
+            "variables": dict(operation["variables"]),
+        }
+
+    for match in _FETCH_RE.finditer(script_text):
+        options = match.group("opts") or ""
+        url = match.group("url")
+        body = _extract_body_from_options(options)
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            _method_from_options(options) or "GET",
+            url,
+            "fetch",
+            body=body,
+            params=_extract_params_from_options(options),
+            content_type=_extract_content_type(options),
+        )
+    for match in _AXIOS_RE.finditer(script_text):
+        method = match.group("method").upper()
+        url = match.group("url")
+        rest = match.group("rest") or ""
+        body = _axios_body_from_rest(method, rest)
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            method,
+            url,
+            "axios",
+            body=body,
+            params=_extract_params_from_options(rest),
+            content_type=_extract_content_type(rest),
+        )
+    for match in _AXIOS_REQUEST_OBJECT_RE.finditer(script_text):
+        config = match.group("config")
+        url_match = re.search(
+            r"\burl\s*:\s*(?P<quote>[\"'`])(?P<url>[^\"'`]+)(?P=quote)",
+            config,
+        )
+        if url_match is None:
+            continue
+        url = url_match.group("url")
+        body = _extract_body_from_options(config)
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            _method_from_options(config) or "GET",
+            url,
+            "axios-request",
+            body=body,
+            params=_extract_params_from_options(config),
+            content_type=_extract_content_type(config),
+        )
+    for match in _XHR_RE.finditer(script_text):
+        add(match.group("method").upper(), match.group("url"), "xhr")
+    for match in _JQUERY_RE.finditer(script_text):
+        url = match.group("url")
+        body = _extract_body_from_options(match.group(0))
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            _jquery_method(match.group(0)) or "GET",
+            url,
+            "ajax",
+            body=body,
+            params=_extract_params_from_options(match.group(0)),
+            content_type=_extract_content_type(match.group(0)),
+        )
+    for match in _OBJECT_URL_RE.finditer(script_text):
+        url = match.group("url")
+        add("GET", url, "object-url", body=graphql_body(url))
+    for match in _HTTP_RE.finditer(script_text):
+        url = match.group("url")
+        body = _extract_body_from_options(match.group(0))
+        if "graphql" in url.lower() and not isinstance(body, dict):
+            body = graphql_body(url) or body
+        add(
+            match.group("method").upper(),
+            url,
+            "http-client",
+            body=body,
+            params=_extract_params_from_options(match.group(0)),
+            content_type=_extract_content_type(match.group(0)),
+        )
+    for match in _WEBSOCKET_RE.finditer(script_text):
+        add(
+            "WS",
+            match.group("url"),
+            "websocket",
+            body=ws_payloads[0] if ws_payloads else None,
+            content_type="application/json" if ws_payloads else None,
+        )
+    for match in _EVENTSOURCE_RE.finditer(script_text):
+        add(
+            "SSE",
+            match.group("url"),
+            "event-source",
+            content_type="text/event-stream",
+        )
+
+
+def _walk_api_fields(
+    block: EmbeddedJson,
+    base: str | None,
+    add: Callable[[str, str, str], None],
+) -> None:
+    if block.parse_error is not None:
+        return
+
+    def walk(value: Any, path: str, depth: int) -> None:
+        if depth > _MAX_JSON_DEPTH:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{path}.{key}" if path else str(key)
+                if isinstance(child, str) and _is_api_key(str(key)) and _looks_like_url(child):
+                    add("GET", child, "json-data")
+                elif not isinstance(child, str):
+                    walk(child, child_path, depth + 1)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{path}[{index}]", depth + 1)
+
+    walk(block.data, block.kind, 0)
+
+
+def _extract_endpoints_from_parser(
+    parser: _PageHTMLParser,
+    base: str | None,
+    embedded_json: list[EmbeddedJson],
+) -> list[ApiEndpoint]:
+    endpoints: list[ApiEndpoint] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add(
+        method: str,
+        url: str,
+        source: str,
+        *,
+        body: Any = None,
+        params: dict[str, Any] | None = None,
+        content_type: str | None = None,
+    ) -> None:
+        normalized = _normalize_endpoint_url(url, base)
+        if normalized is None:
+            return
+        body_key = json.dumps(body, sort_keys=True, ensure_ascii=False, default=str) if body else ""
+        key = (method.upper(), normalized, body_key)
+        if key in seen:
+            return
+        seen.add(key)
+        endpoints.append(
+            ApiEndpoint(
+                method=method.upper(),
+                url=normalized,
+                source=source,
+                body=body,
+                params=params,
+                content_type=content_type,
+            )
+        )
+
+    for src in parser.script_srcs:
+        add("GET", src, "script-src")
+    for rel, href in parser.links:
+        if rel in {"preload", "modulepreload", "preconnect", "dns-prefetch"}:
+            add("GET", href, "link")
+    for method, action in parser.forms:
+        add(method, action, "form")
+    for _, _, script_text in parser.script_blocks:
+        _add_js_endpoints(script_text, base, add)
+    for block in embedded_json:
+        if (
+            block.parse_error is None
+            and isinstance(block.data, dict)
+            and (block.kind == "next-data" or block.name == "__NEXT_DATA__")
+        ):
+            build_id = block.data.get("buildId")
+            page = block.data.get("page")
+            if build_id and page:
+                page_path = page if page.startswith("/") else f"/{page}"
+                add("GET", f"/_next/data/{build_id}{page_path}.json", "next-data")
+        _walk_api_fields(block, base, add)
+    return endpoints
+
+
+_HLS_KEYS = frozenset({"hls", "m3u8", "playlist", "playlisturl", "playurl"})
+_DASH_KEYS = frozenset({"dash", "mpd", "manifest"})
+_SMOOTH_KEYS = frozenset({"smooth", "ism", "manifesturl"})
+_AUDIO_KEYS = frozenset({"audio", "audios", "audiourl", "mp3", "sound", "music", "track", "tracks"})
+_VIDEO_KEYS = frozenset(
+    {
+        "video",
+        "videos",
+        "videourl",
+        "mp4",
+        "stream",
+        "streams",
+        "streamurl",
+        "source",
+        "sources",
+        "src",
+        "file",
+        "fileurl",
+        "media",
+        "mediaurl",
+        "contenturl",
+        "embedurl",
+        "downloadurl",
+    }
+)
+_IMAGE_KEYS = frozenset(
+    {
+        "image",
+        "images",
+        "imageurl",
+        "picture",
+        "pictures",
+        "pic",
+        "thumb",
+        "thumbnail",
+        "thumbnailurl",
+        "cover",
+        "coverurl",
+        "poster",
+        "posterurl",
+        "background",
+        "backgroundurl",
+        "banner",
+        "logo",
+        "icon",
+        "avatar",
+        "preview",
+        "previewurl",
+        "ogimage",
+    }
+)
+_AUDIO_EXTS = (".mp3", ".aac", ".m4a", ".wav", ".flac", ".ogg", ".opus", ".wma")
+_VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".avi", ".flv", ".ts", ".m4v", ".wmv")
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif", ".ico")
+_API_HINTS = (
+    "api",
+    "endpoint",
+    "baseurl",
+    "server",
+    "gateway",
+    "webhook",
+    "callback",
+    "upload",
+    "auth",
+    "token",
+    "login",
+    "logout",
+    "host",
+    "domain",
+)
+_PAGINATION_NAMES = frozenset(
+    {
+        "page",
+        "pagenum",
+        "pagenumber",
+        "pagesize",
+        "current",
+        "currentpage",
+        "total",
+        "totalcount",
+        "totalpages",
+        "hasmore",
+        "hasnext",
+        "next",
+        "nextpage",
+        "nextcursor",
+        "cursor",
+        "offset",
+        "limit",
+        "isend",
+        "nomore",
+        "end",
+        "count",
+    }
+)
+
+
+def _is_api_key(key: str) -> bool:
+    return any(hint in key for hint in _API_HINTS)
+
+
+def _is_pagination_key(key: str) -> bool:
+    if key in _PAGINATION_NAMES:
+        return True
+    return (
+        key.startswith("page")
+        or key.endswith("page")
+        or key.startswith("total")
+        or key.startswith("hasmore")
+        or key.startswith("hasnext")
+        or key.startswith("next")
+        or key.startswith("isend")
+        or key.startswith("nomore")
+    )
+
+
+def _classify_json_media(key: str, value: str) -> str | None:
+    lower = value.lower()
+    if ".m3u8" in lower or key in _HLS_KEYS:
+        return "hls"
+    if ".mpd" in lower or "format=mpd" in lower or key in _DASH_KEYS:
+        return "dash"
+    if ".ism/manifest" in lower or (
+        "manifest" in lower and "format=mp4" in lower
+    ) or key in _SMOOTH_KEYS:
+        return "smooth"
+    if lower.endswith(_AUDIO_EXTS) or key in _AUDIO_KEYS:
+        return "audio"
+    if lower.endswith(_VIDEO_EXTS) or key in _VIDEO_KEYS:
+        return "video"
+    if lower.endswith(_IMAGE_EXTS) or key in _IMAGE_KEYS:
+        return "image"
+    return None
+
+
+def _append_pagination(
+    pagination: dict[str, list[dict[str, Any]]],
+    key: str,
+    path: str,
+    value: Any,
+) -> None:
+    normalized_key = re.sub(r"[^a-z0-9]", "", key.lower())
+    bucket = pagination.setdefault(normalized_key, [])
+    if len(bucket) >= _MAX_PAGINATION_PER_KEY:
+        return
+    entry = {"path": path, "key": key, "value": value}
+    if entry not in bucket:
+        bucket.append(entry)
+
+
+def _handle_json_string(
+    key: str,
+    value: str,
+    path: str,
+    base_url: str | None,
+    media: MediaExtraction,
+    api_fields: list[ApiField],
+    pagination: dict[str, list[dict[str, Any]]],
+) -> None:
+    key_norm = re.sub(r"[^a-z0-9]", "", key.lower())
+    if _is_pagination_key(key_norm):
+        _append_pagination(pagination, key, path, value)
+    if not _looks_like_url(value):
+        return
+    normalized = normalize_url(value, base_url)
+    category = _classify_json_media(key_norm, value)
+    if category == "hls":
+        media.hls.append(normalized)
+    elif category == "dash":
+        media.dash.append(normalized)
+    elif category == "smooth":
+        media.smooth.append(normalized)
+    elif category == "audio":
+        media.audios.append(normalized)
+    elif category == "video":
+        media.videos.append(normalized)
+    elif category == "image":
+        media.images.append(normalized)
+    if _is_api_key(key_norm) and len(api_fields) < _MAX_API_FIELDS:
+        api_fields.append(ApiField(path=path, key=key, value=normalized))
+
+
+def _walk_json_data(
+    value: Any,
+    path: str,
+    base_url: str | None,
+    media: MediaExtraction,
+    api_fields: list[ApiField],
+    pagination: dict[str, list[dict[str, Any]]],
+    depth: int,
+) -> None:
+    if depth > _MAX_JSON_DEPTH:
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            key_norm = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if isinstance(child, str):
+                _handle_json_string(
+                    str(key),
+                    child,
+                    child_path,
+                    base_url,
+                    media,
+                    api_fields,
+                    pagination,
+                )
+            elif _is_pagination_key(key_norm) and not isinstance(child, dict | list):
+                _append_pagination(pagination, str(key), child_path, child)
+            elif isinstance(child, dict | list):
+                _walk_json_data(
+                    child,
+                    child_path,
+                    base_url,
+                    media,
+                    api_fields,
+                    pagination,
+                    depth + 1,
+                )
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            child_path = f"{path}[{index}]"
+            if isinstance(child, str):
+                _handle_json_string(
+                    "item",
+                    child,
+                    child_path,
+                    base_url,
+                    media,
+                    api_fields,
+                    pagination,
+                )
+            else:
+                _walk_json_data(
+                    child,
+                    child_path,
+                    base_url,
+                    media,
+                    api_fields,
+                    pagination,
+                    depth + 1,
+                )
+
+
+def _dedupe_media(extraction: MediaExtraction) -> None:
+    seen: set[str] = set()
+    for name in ("videos", "audios", "images", "hls", "links"):
+        values: list[str] = []
+        for url in getattr(extraction, name):
+            if url not in seen:
+                seen.add(url)
+                values.append(url)
+        setattr(extraction, name, values)
+
+
+def _digest_json(
+    blocks: list[EmbeddedJson],
+    base_url: str | None,
+) -> tuple[MediaExtraction, list[ApiField], dict[str, list[dict[str, Any]]]]:
+    media = MediaExtraction()
+    api_fields: list[ApiField] = []
+    pagination: dict[str, list[dict[str, Any]]] = {}
+    for block in blocks:
+        if block.parse_error is None:
+            _walk_json_data(
+                block.data,
+                block.kind,
+                base_url,
+                media,
+                api_fields,
+                pagination,
+                0,
+            )
+    _dedupe_media(media)
+    return media, api_fields[:_MAX_API_FIELDS], pagination
+
+
+def _media_counts(extraction: MediaExtraction) -> dict[str, int]:
+    return {
+        "videos": len(extraction.videos),
+        "audios": len(extraction.audios),
+        "images": len(extraction.images),
+        "hls": len(extraction.hls),
+        "dash": len(extraction.dash),
+        "smooth": len(extraction.smooth),
+        "links": len(extraction.links),
+    }
+
+
+def _media_lists(extraction: MediaExtraction) -> dict[str, list[str]]:
+    return {
+        "videos": list(extraction.videos),
+        "audios": list(extraction.audios),
+        "images": list(extraction.images),
+        "hls": list(extraction.hls),
+        "dash": list(extraction.dash),
+        "smooth": list(extraction.smooth),
+        "links": list(extraction.links),
+    }
+
+
+def _json_block_summary(item: EmbeddedJson) -> dict[str, Any]:
+    return {
+        "kind": item.kind,
+        "name": item.name,
+        "size_bytes": item.size_bytes,
+        "parse_error": item.parse_error,
+    }
+
+
+def extract_metadata(html: str, base_url: str | None = None) -> PageMetadata:
+    """Return title/meta/canonical/OpenGraph metadata from an HTML page."""
+    parser = _PageHTMLParser()
+    parser.feed(html)
+    return _build_metadata(parser, base_url, _effective_base(parser, base_url))
+
+
+def extract_embedded_json(html: str) -> list[EmbeddedJson]:
+    """Return parsed JSON-LD, application/json, and JS global state blocks."""
+    parser = _PageHTMLParser()
+    parser.feed(html)
+    return _extract_embedded_from_parser(parser)
+
+
+def extract_api_endpoints(
+    html: str,
+    base_url: str | None = None,
+    embedded_json: list[EmbeddedJson] | None = None,
+) -> list[ApiEndpoint]:
+    """Return API endpoints from scripts, forms, preloads, and JSON state."""
+    parser = _PageHTMLParser()
+    parser.feed(html)
+    if embedded_json is None:
+        embedded_json = _extract_embedded_from_parser(parser)
+    return _extract_endpoints_from_parser(parser, _effective_base(parser, base_url), embedded_json)
+
+
+def analyze_page(html: str, base_url: str | None = None) -> PageDataAnalysis:
+    """Deep-parse one page: metadata, media, embedded JSON, APIs, and data."""
+    parser = _PageHTMLParser()
+    parser.feed(html)
+    effective_base = _effective_base(parser, base_url)
+    embedded = _extract_embedded_from_parser(parser)
+    json_media, json_api_fields, pagination = _digest_json(embedded, effective_base)
+    media = extract_media_urls(html, base_url)
+    api_endpoints = _extract_endpoints_from_parser(parser, effective_base, embedded)
+    streams = [
+        endpoint.to_dict()
+        for endpoint in api_endpoints
+        if endpoint.method in {"WS", "SSE"}
+        or endpoint.source in {"websocket", "event-source"}
+    ]
+    js_events: list[dict[str, Any]] = []
+    for _, _, script_text in parser.script_blocks:
+        js_events.extend(_extract_js_events(script_text))
+    events = list(parser.dom_events) + js_events
+    asset_sets: dict[str, set[str]] = {
+        "css": set(),
+        "js": set(),
+        "fonts": set(),
+        "images": set(),
+        "data": set(),
+        "documents": set(),
+    }
+    for rel, href in parser.links:
+        asset_url = normalize_url(href, effective_base)
+        lower = asset_url.lower()
+        rel_norm = str(rel or "").lower()
+        if "stylesheet" in rel_norm or lower.endswith(".css"):
+            asset_sets["css"].add(asset_url)
+        elif "icon" in rel_norm or lower.endswith(
+            (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico")
+        ):
+            asset_sets["images"].add(asset_url)
+        elif lower.endswith((".js", ".mjs")):
+            asset_sets["js"].add(asset_url)
+        elif lower.endswith((".woff", ".woff2", ".ttf", ".otf", ".eot")):
+            asset_sets["fonts"].add(asset_url)
+        elif lower.endswith((".json", ".xml", ".csv")):
+            asset_sets["data"].add(asset_url)
+        elif rel_norm in {"preload", "prefetch"} or lower.endswith(
+            (".pdf", ".zip", ".rar", ".7z", ".doc", ".docx", ".xls", ".xlsx")
+        ):
+            asset_sets["documents"].add(asset_url)
+        else:
+            asset_sets["documents"].add(asset_url)
+    for src in parser.script_srcs:
+        asset_sets["js"].add(normalize_url(src, effective_base))
+    assets = {key: sorted(value) for key, value in asset_sets.items()}
+    return PageDataAnalysis(
+        url=base_url,
+        metadata=_build_metadata(parser, base_url, effective_base),
+        media=media,
+        embedded_json=embedded,
+        json_media=json_media,
+        json_api_fields=json_api_fields,
+        form_fields=list(parser.form_fields),
+        api_endpoints=api_endpoints,
+        streams=streams,
+        events=events,
+        assets=assets,
+        pagination=pagination,
+        captchas=detect_captchas(html, base_url),
+        links=list(media.links),
+        login=detect_login(html, base_url),
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Fetch a page and print its deep analysis as JSON."""
+    parser = argparse.ArgumentParser(
+        description="Analyze a page's data, API endpoints, and CAPTCHAs."
+    )
+    parser.add_argument("--url", required=True, help="page URL to analyze")
+    parser.add_argument("--base-url", default=None, help="override URL resolution base")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="include embedded JSON bodies instead of block summaries",
+    )
+    parser.add_argument("--output", default=None, help="write JSON to a file")
+    parser.add_argument("--headers", default=None, help='JSON object, e.g. {"X-Token": "..."}')
+    parser.add_argument("--proxy", default=None)
+    parser.add_argument(
+        "--min-interval",
+        type=float,
+        default=0.0,
+        help="minimum seconds between HTTP requests",
+    )
+    args = parser.parse_args(argv)
+
+    from media_session import MediaSession
+
+    headers = json.loads(args.headers) if args.headers else None
+    session = MediaSession(
+        headers=headers,
+        proxy=args.proxy,
+        min_interval=args.min_interval,
+    )
+    body, _ = session.get_bytes(args.url)
+    analysis = analyze_page(
+        body.decode("utf-8", "replace"),
+        base_url=args.base_url or args.url,
+    )
+    text = json.dumps(
+        analysis.to_dict(include_data=args.full),
+        ensure_ascii=False,
+        indent=2,
+    )
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+    else:
+        print(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "app_name": "SampleApp",
+  "log_level": "INFO",
+  "window": {
+    "width": 1024,
+    "height": 720,
+    "x": null,
+    "y": null,
+    "maximized": false
+  },
+  "hotkeys": {
+    "start": "F5",
+    "stop": "F6",
+    "panic": "ctrl+shift+escape"
+  },
+  "recent_files": [
+    "C:/path/to/recent1.txt",
+    "C:/path/to/recent2.txt"
+  ],
+  "feature_flags": {
+    "auto_update": true,
+    "telemetry": false
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "engine_plan_version": 1,
+  "auto": true,
+  "engines": {
+    "hardware": {
+      "name": "wan-8gb",
+      "status": "available",
+      "params": {
+        "gpu": "NVIDIA GeForce RTX 4060",
+        "vram_gb": 7.99609375,
+        "ram_gb": 39.8397331237793,
+        "recommended": {
+          "model": "wan",
+          "width": 480,
+          "height": 832,
+          "frames": 25,
+          "steps": 12,
+          "block_swap": 20,
+          "force_offload": true,
+          "text_device": "cpu"
+        }
+      }
+    },
+    "image": {
+      "name": "comfyui",
+      "status": "available",
+      "params": {
+        "endpoint": "http://127.0.0.1:8188",
+        "model": "RealVisXL_V4.0",
+        "installer": "install_image_engine.py --auto-install",
+        "generate": "generate_images.py"
+      }
+    },
+    "video_gen": {
+      "name": "comfyui-wan",
+      "status": "available",
+      "params": {
+        "model": "wan",
+        "model_file": "E:\\soft\\manga-drama-image\\ComfyUI\\models\\diffusion_models\\Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors",
+        "model_dir": "E:\\soft\\manga-drama-video\\video-models\\wan",
+        "custom_nodes": [
+          "ComfyUI-LivePortraitKJ",
+          "ComfyUI-VideoHelperSuite",
+          "ComfyUI-WanVideoWrapper",
+          "__pycache__"
+        ],
+        "hardware_profile": "wan-8gb",
+        "recommended": {
+          "model": "wan",
+          "width": 480,
+          "height": 832,
+          "frames": 25,
+          "steps": 12,
+          "block_swap": 20,
+          "force_offload": true,
+          "text_device": "cpu"
+        },
+        "installer": "install_video_engine.py --install --models wan",
+        "generate": "generate_video.py"
+      }
+    },
+    "talking_head": {
+      "name": "comfyui",
+      "status": "available",
+      "params": {
+        "cli": [],
+        "comfyui_nodes": [
+          "ComfyUI-LivePortraitKJ"
+        ],
+        "installer": "install_video_engine.py --install --models liveportrait"
+      }
+    },
+    "video": {
+      "name": "ffmpeg",
+      "status": "available",
+      "params": {
+        "encoder": "libx264",
+        "audio": "aac"
+      }
+    },
+    "audio_tts": {
+      "name": "edge-tts",
+      "status": "available",
+      "params": {
+        "provider": "edge"
+      }
+    },
+    "digital_human": {
+      "name": "still-portrait",
+      "status": "available",
+      "params": {
+        "mode": "ken-burns"
+      }
+    },
+    "camera_motion": {
+      "name": "video-native",
+      "status": "available",
+      "params": {
+        "mode": "video-native",
+        "fallback": "static"
+      }
+    },
+    "subtitles": {
+      "name": "ffmpeg-subtitles",
+      "status": "available",
+      "params": {
+        "encoding": "utf-8-no-bom"
+      }
+    },
+    "resource_reader": {
+      "name": "codex-tools",
+      "status": "available",
+      "params": {
+        "tools": [
+          "browser",
+          "open_page",
+          "curl",
+          "ffmpeg",
+          "asr",
+          "ocr"
+        ]
+      }
+    },
+    "postprocess": {
+      "name": "ffmpeg-vapoursynth",
+      "status": "available",
+      "params": {
+        "profile": "balanced",
+        "installer": "install_ffmpeg_vapoursynth.py --auto-install",
+        "models": "setup_postprocess.py --install-models"
+      }
+    }
+  },
+  "reference_bundle": {
+    "status": "pending",
+    "images": 0,
+    "videos": 0,
+    "audio": 0
+  },
+  "fallbacks": {
+    "image": [
+      "comfyui",
+      "sd-webui",
+      "imagegen",
+      "install-local"
+    ],
+    "video_gen": [
+      "still-kenburns",
+      "ffmpeg-ken-burns",
+      "install-local"
+    ],
+    "talking_head": [
+      "voice-only",
+      "install-local"
+    ],
+    "video": [],
+    "audio_tts": [
+      "speech",
+      "openai-tts",
+      "edge-tts"
+    ],
+    "digital_human": [
+      "liveportrait",
+      "still-portrait"
+    ],
+    "camera_motion": [
+      "ffmpeg-ken-burns",
+      "static"
+    ],
+    "subtitles": [],
+    "resource_reader": [
+      "manual-user-input"
+    ],
+    "postprocess": [
+      "ffmpeg-only",
+      "manual-user-input"
+    ]
+  },
+  "user_overrides": {},
+  "notes": []
+}

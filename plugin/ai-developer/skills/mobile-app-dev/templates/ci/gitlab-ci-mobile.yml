@@ -1,0 +1,47 @@
+stages:
+  - test
+  - build
+
+variables:
+  GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g"
+
+.android-template: &android-template
+  image: eclipse-temurin:17-jdk
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends unzip
+    - test -n "$ANDROID_SDK_ROOT"
+  artifacts:
+    paths:
+      - app/build/outputs/
+    expire_in: 1 week
+
+flutter-test:
+  stage: test
+  image: subosito/flutter:stable
+  script:
+    - flutter pub get
+    - flutter test
+
+android-test:
+  <<: *android-template
+  stage: test
+  script:
+    - ./gradlew test
+
+android-build:
+  <<: *android-template
+  stage: build
+  script:
+    - ./gradlew :app:bundleRelease
+
+ios-test:
+  stage: test
+  tags: [macos]
+  script:
+    - xcodebuild -project MyApp.xcodeproj -scheme MyApp -destination 'platform=iOS Simulator,name=iPhone 15' test
+
+ios-build:
+  stage: build
+  tags: [macos]
+  script:
+    - xcodebuild -project MyApp.xcodeproj -scheme MyApp -destination 'generic/platform=iOS' archive

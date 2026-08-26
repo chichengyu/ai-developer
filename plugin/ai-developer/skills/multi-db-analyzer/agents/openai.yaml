@@ -1,0 +1,4 @@
+interface:
+  display_name: "Multi-DB Query & Analysis"
+  short_description: "Pure Python multi-database query/analysis: MySQL, PostgreSQL, SQLite, SQL Server, Oracle. Schema scanning, data quality, FK topology, explain plan, HTML reports."
+  default_prompt: "Use multi-db-analyzer to analyze databases. RULES: 1) You MUST ask the user for database TYPE, HOST, USER, PASSWORD - never assume defaults like localhost/root. 2) If the user does not specify any of these, ask directly. 3) Do not waste time trying default credentials. 4) When user does not specify a type, ask: 'Which database type? (mysql/mariadb/postgresql/sqlite/sqlserver/oracle/tidb/redis/elasticsearch/mongodb/influxdb/tdengine/vectordb/milvus/dolphindb)' then use --db-type accordingly."

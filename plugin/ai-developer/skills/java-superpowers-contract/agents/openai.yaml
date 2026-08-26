@@ -1,0 +1,4 @@
+interface:
+  display_name: "Java 研发现控契约"
+  short_description: "Java 项目开发管控：最小改动、环境隔离、SQL 回滚红线、审计汇报"
+  default_prompt: "遵循 java-superpowers-contract 契约。强制流程：1) 先四层穿透分析 2) 再自动编译验证（java_compiler）3) 再静态代码分析（java_static_analyzer）4) 最后审计汇报。变更前必须运行编译验证确保无编译错误。"

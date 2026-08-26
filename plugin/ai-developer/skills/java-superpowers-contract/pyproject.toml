@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "java-superpowers-contract"
+version = "1.0.0"
+description = "Java 项目研发现控契约工具集：数据库分析、审计报告、需求分析、ERD 可视化"
+requires-python = ">=3.8"
+dependencies = ["pymysql>=1.1.0"]
+
+[project.scripts]
+java-db-query = "scripts.database_query:main"
+java-audit-report = "scripts.audit_report_generator:main"
+java-req-analyze = "scripts.req_analyzer:main"
+java-sql-explain = "scripts.sql_explain_analyzer:main"
+java-csv-export = "scripts.csv_exporter:main"
+java-erd-view = "scripts.erd_viewer:main"
+java-table-deps = "scripts.table_dependency:main"
+ java-cicd-helper = "scripts.cicd_helper:main"
+ java-skill-bridge = "scripts.skill_bridge:main"
+ java-compile = "scripts.java_compiler:main"
+ java-static-analyze = "scripts.java_static_analyzer:main"
+
+[tool.setuptools.packages.find]
+include = ["scripts*"]

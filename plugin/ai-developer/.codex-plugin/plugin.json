@@ -1,0 +1,30 @@
+{
+  "name": "ai-developer",
+  "version": "1.0.0",
+  "description": "Bundles nine Codex skills for web scraping, desktop/mobile apps, multi-DB analysis, manga-drama video production, and contract-driven Java work into a single installable plugin.",
+  "author": {
+    "name": "ai-developer maintainers",
+    "url": "https://github.com/ai-developer/ai-developer"
+  },
+  "homepage": "https://github.com/ai-developer/ai-developer#readme",
+  "repository": "https://github.com/ai-developer/ai-developer",
+  "license": "MIT",
+  "keywords": [
+    "scraping",
+    "desktop-app",
+    "mobile-app",
+    "multi-database",
+    "manga-drama",
+    "java-contract"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "AI Developer",
+    "shortDescription": "Nine Codex skills in one plugin: scraping, apps, DBs, video.",
+    "longDescription": "AI Developer is a personal Codex plugin that bundles nine curated skills into a single installable unit: anti-bot-web-scraper, desktop-app-dev, java-superpowers-contract, manga-drama-video, manga-drama-video-helper, mobile-app-dev, multi-db-analyzer, scraper-unblocker, and token-economizer. Use it when you need anti-bot web scraping, native desktop or mobile app development guidance, multi-database schema and SQL/NoSQL analysis, end-to-end AI manga-drama video pipelines, contract-driven Java engineering, or a global token-economizer that compresses Codex output. Each skill ships in its own folder under ./skills/ and can be invoked independently.",
+    "developerName": "ai-developer maintainers",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write", "Web", "Interactive"],
+    "defaultPrompt": "List the skills bundled in this plugin and pick the right one for my task."
+  }
+}

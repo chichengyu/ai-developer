@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "multi-db-analyzer"
+version = "2.1.0"
+description = "Multi-DB query & analysis tool. SQL (MySQL, PostgreSQL, SQLite, SQL Server, Oracle, MariaDB, TiDB) + NoSQL (Redis, Elasticsearch, MongoDB) + TimeSeries (InfluxDB, TDengine) + VectorDB (Qdrant)."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["pymysql>=1.1.0"]
+
+[project.optional-dependencies]
+postgresql = ["psycopg2-binary>=2.9"]
+sqlserver = ["pymssql>=2.2"]
+oracle = ["oracledb>=2.0"]
+redis = ["redis>=4.0"]
+elasticsearch = ["elasticsearch>=7.0"]
+mongodb = ["pymongo>=4.0"]
+influxdb = ["influxdb-client>=1.30"]
+tdengine = ["taos>=2.0"]
+vectordb = ["qdrant-client>=1.0"]
+milvus = ["pymilvus>=2.3"]
+dolphindb = ["dolphindb>=1.20"]
+crypto = ["cryptography>=41.0"]
+all = ["pymysql>=1.1.0","psycopg2-binary>=2.9","pymssql>=2.2","oracledb>=2.0",
+       "redis>=4.0","elasticsearch>=7.0","pymongo>=4.0","influxdb-client>=1.30",
+       "taos>=2.0","qdrant-client>=1.0","pymilvus>=2.3","dolphindb>=1.20","cryptography>=41.0"]
+
+[project.scripts]
+multi-db-analyzer = "scripts.database_query:main"
+java-db-erd = "scripts.erd_viewer:main"
+java-db-explain = "scripts.sql_explain_analyzer:main"
+java-db-export = "scripts.csv_exporter:main"
+java-db-deps = "scripts.table_dependency:main"
+java-db-audit = "scripts.audit_report_generator:main"
+java-db-bridge = "scripts.skill_bridge:main"
+java-db-cicd = "scripts.cicd_helper:main"
+java-db-req = "scripts.req_analyzer:main"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Token 精约器 v3"
+  short_description: "通用 Token 精约与响应压缩引擎，自动强制启用极简输出模式，最大化减少 Token 消耗。支持 Java 特化压缩、自检门禁与渐进展开"
+  default_prompt: "自动加载 Token 精约器规则（v3）：以最高压缩比执行本次任务，Java 特化压缩已就绪"

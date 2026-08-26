@@ -1,0 +1,16 @@
+{
+  "app_name": "YourApp",
+  "help": "依赖中心会自动下载并安装本软件所需的全部依赖，下载使用分片并发和断点续传。你只需点击“安装依赖”。如果你想手动安装，请按下方每个依赖的“手动安装”说明操作。",
+  "dependencies": [
+    {
+      "name": "example-dependency",
+      "kind": "archive",
+      "url": "https://download.example.com/example-dependency.zip",
+      "homepage": "https://www.example.com/example-dependency",
+      "description": "这是示例依赖，请改成你软件真正需要的依赖说明。",
+      "manual_install": "自动安装：点击“安装依赖”。手动安装：打开官网或下载页，解压到应用 runtime 目录后重启。",
+      "sha256": "",
+      "bin_names": ["example-tool.exe"]
+    }
+  ]
+}
