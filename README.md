@@ -50,7 +50,7 @@ ai-developer/
 ├── .opencode/INSTALL.md              # OpenCode 安装说明
 ├── README.md            # 本文件
 ├── scripts/
-│   └── install_skills.py  # 通用 Agent 安装器
+│   └── install_skills.py  # 可选本地工具，远程安装不依赖
 ├── plugin/              # 插件包（跨桌面 Agent）
 │   └── ai-developer-skill-plugin/
 │       ├── .codex-plugin/plugin.json
@@ -144,28 +144,25 @@ codex plugin add ai-developer-skill-plugin@ai-developer
 codex plugin install ./plugin/ai-developer-skill-plugin
 ```
 
-### 通用安装（推荐）
+### 远程安装（推荐，无需 Python）
 
-任何桌面 Agent 都可以用同一种方式：克隆仓库后运行通用安装器，脚本会自动把 9 个技能复制到已检测到的 Agent skills 目录。
+远程安装不需要克隆仓库，也不需要 Python。每个 Agent 通过自己的插件市场命令，从同一个远程仓库安装：
 
-```bash
-git clone https://github.com/chichengyu/ai-developer.git
-cd ai-developer
-python3 scripts/install_skills.py
+| Agent | 远程安装方式 |
+| --- | --- |
+| Codex 桌面端 / CLI | `codex plugin marketplace add https://github.com/chichengyu/ai-developer.git`，再执行 `codex plugin add ai-developer-skill-plugin@ai-developer` |
+| Claude Code / Desktop | `/plugin marketplace add chichengyu/ai-developer`，再执行 `/plugin install ai-developer-skill-plugin@ai-developer` |
+| Cursor | 在插件市场添加 `https://github.com/chichengyu/ai-developer`，搜索并安装 `ai-developer-skill-plugin` |
+| OpenCode | 将 [.opencode/INSTALL.md](./.opencode/INSTALL.md) 的远程地址交给 OpenCode 执行 |
+| 其他支持 Git marketplace 的桌面 Agent | 在插件市场添加 `https://github.com/chichengyu/ai-developer`，再安装 `ai-developer-skill-plugin` |
+
+OpenCode 可以直接输入：
+
+```text
+Fetch and follow instructions from https://raw.githubusercontent.com/chichengyu/ai-developer/main/.opencode/INSTALL.md
 ```
 
-脚本默认自动检测本机已安装的 Codex、Claude、Cursor、Gemini 和 OpenCode；`--list` 可查看支持的目录，`--dry-run` 可先查看安装计划。
-
-也可以安装到所有已知 Agent，或指定任意 Agent 的 skills 目录：
-
-```bash
-python3 scripts/install_skills.py --list
-python3 scripts/install_skills.py --all
-python3 scripts/install_skills.py --agent claude
-python3 scripts/install_skills.py --dest <你的Agent skills目录>
-```
-
-没有 Python 环境时，直接把 `skills/skills/*` 复制到目标 Agent 的 skills 目录即可。
+仓库已提供 Codex、Claude、Cursor 三个 marketplace 清单和 OpenCode 安装说明。`scripts/install_skills.py` 仅为开发者的可选本地工具，普通远程安装不依赖 Python。
 
 校验：
 
@@ -173,19 +170,7 @@ python3 scripts/install_skills.py --dest <你的Agent skills目录>
 python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plugin/ai-developer-skill-plugin
 ```
 
-仓库已生成 `.agents/plugins/marketplace.json`，`codex plugin add` 使用的市场名为 `ai-developer`。
-
-### 各桌面 Agent 专属方式
-
-技能本体是标准的 `SKILL.md` 目录，可复制到任何支持 Agent Skills 的桌面端；仓库同时提供 Codex、Claude、Cursor 三个 marketplace 入口。
-
-| Agent | 安装方式 |
-| --- | --- |
-| Codex 桌面端 / CLI | `codex plugin marketplace add https://github.com/chichengyu/ai-developer.git`，再执行 `codex plugin add ai-developer-skill-plugin@ai-developer` |
-| Claude Code / Desktop | `/plugin marketplace add https://github.com/chichengyu/ai-developer`，再执行 `/plugin install ai-developer-skill-plugin@ai-developer` |
-| Cursor | 在插件市场添加 `https://github.com/chichengyu/ai-developer`，搜索并安装 `ai-developer-skill-plugin` |
-| OpenCode | 按 [.opencode/INSTALL.md](./.opencode/INSTALL.md) 安装，或让 OpenCode 执行该文件的步骤 |
-| 其他桌面 Agent | 克隆仓库后，把 `skills/skills/*` 复制到该 Agent 的 skills 目录并重启 |
+仓库已生成 `.agents/plugins/marketplace.json`，Codex 使用的市场名为 `ai-developer`。
 
 <a id="刷新插件副本"></a>
 ## 刷新插件副本
